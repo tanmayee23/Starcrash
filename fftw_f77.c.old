@@ -1,0 +1,171 @@
+**************************************************************
+c     This file is part of the StarCrash code
+c     Version 1.0
+c
+c     Copyright 2003, by Joshua Faber
+c     This code is publicly available under the terms of the
+c     GNU General Public License.  See our documentation, or
+c     http://www.gnu.org/licenses/gpl.html for more details.
+***************************************************************
+c
+c	use this file instead of fftw_f77.c for versions 2.0.x of
+c	the FFTW.
+c
+/*
+ * Copyright (c) 1997,1998 Massachusetts Institute of Technology
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
+ */
+
+#include <fftw.h>
+#include <fftwnd_mpi.h>
+#include <transpose_mpi.h>
+#include <rfftw.h>
+/* fftw_f77.c:
+
+   FORTRAN-callable "wrappers" for some of the FFTW routines.  To
+   make these routines callable from FORTRAN, three things had to
+   be done:
+
+   * The routine names have to be in the style that is expected by
+     the FORTRAN linker.  This is accomplished with the FORTRANIZE
+     macro.
+
+   * All parameters must be passed by reference.
+
+   * Return values had to be converted into parameters (some
+     Fortran implementations seem to have trouble calling C functions
+     that return a value).
+
+   Note that the "fftw_plan" and "fftwnd_plan" types are pointers.
+   The calling FORTRAN code should use a type of the same size
+   (probably "integer").
+
+   The wrapper routines have the same name as the wrapped routine,
+   except that "fftw" and "fftwnd" are replaced by "fftw_f77" and
+   "fftwnd_f77".
+
+*/
+
+/************************************************************************/
+
+/*
+ * convert C name -> FORTRAN name.  On some systems,
+ * append an underscore. On other systems, use all caps.
+ *
+ * x is the lower case name, X is the all caps name.
+ */
+
+#if defined(CRAY) || defined(_UNICOS) || defined(_CRAYMPP)
+#define FORTRANIZE(x,X) X /* all upper-case on the Cray */
+
+#elif defined(SOLARIS)
+#define FORTRANIZE(x,X) x##_  /* append an underscore for Solaris */
+
+#elif defined(IBM6000) || defined(_AIX)
+#define FORTRANIZE(x,X) x  /* all lower-case on RS/6000 */
+
+#elif defined(USING_G77) /* users should define this when using with the g77
+			    Fortran compiler */
+#define FORTRANIZE(x,X) x##__  /* g77 expects *two* underscores after
+				  names with an underscore */
+
+#else
+#define FORTRANIZE(x,X) x##_  /* use all lower-case with underscore
+				 by default */
+
+#endif
+
+/************************************************************************/
+
+/* PLAN CREATION */
+/* Included wrappers: fftw,fftwnd,fftw2d,fftw3d,fftw3d_mpi,rfftw3d */
+/*                    transpose_mpi */
+/*******************************************************************/
+
+
+void FORTRANIZE(make_plans,MAKE_PLANS)
+(rfftwnd_plan *p1,rfftwnd_plan *p2,transpose_mpi_plan *p3,
+ fftw_plan *p4, fftw_plan *p5,int *n)
+{
+  *p1 = rfftw2d_create_plan(*n,*n,FFTW_REAL_TO_COMPLEX,
+			    FFTW_MEASURE); 
+  *p2 = rfftw2d_create_plan(*n,*n,FFTW_COMPLEX_TO_REAL,
+			    FFTW_MEASURE);
+  *p3 = transpose_mpi_create_plan(*n,*n,MPI_COMM_WORLD); 
+  *p4 = fftw_create_plan(*n,FFTW_FORWARD,FFTW_MEASURE|FFTW_IN_PLACE);
+  *p5 = fftw_create_plan(*n,FFTW_BACKWARD,FFTW_MEASURE|FFTW_IN_PLACE);
+}
+void make_numbers(int *n, int lnx, int lxs, int lny, int lys, int tls)
+{
+  n[0] = lnx;
+  n[1] = lxs;
+  n[2] = lny;
+  n[3] = lys;
+  n[4] = tls;
+}
+
+void FORTRANIZE(fftwnd_f77_mpi_local_sizes,FFTWND_F77_MPI_LOCAL_SIZES)
+(fftwnd_mpi_plan *p, int *n)
+{
+  int lnx;
+  int lxs;
+  int lny;
+  int lys;
+  int tls;
+  fftwnd_mpi_local_sizes(*p,&lnx,&lxs,
+			 &lny,&lys,&tls);
+  make_numbers(n,lnx,lxs,lny,lys,tls);
+}
+
+void FORTRANIZE(rcfft,RCFFT)
+(rfftwnd_plan *planr,transpose_mpi_plan *plant,fftw_plan *planc, 
+int *howmany, int *n, fftw_real *in, fftw_complex *out)
+{
+  int i;
+  /*  here is where we do the 2-d transforms*/
+  rfftwnd_real_to_complex(*planr,*howmany,in,1,
+	  (*n)*(*n),out,1,
+	  (*n)*(*n/2+1));
+  /* here is where we run the transpose */			
+  transpose_mpi(*plant,(TRANSPOSE_EL_TYPE *)out,*n+2);
+  /* here is where we do the remaining 1-d transform */
+  for (i=0;i<(*howmany);i++) { 
+    fftw(*planc,*n/2+1,&(out[i*(*n)*(*n/2+1)]), 
+  	 *n/2+1,1,0,0,0);
+  }
+}
+
+void FORTRANIZE(crfft,CRFFT)
+(rfftwnd_plan *planr,transpose_mpi_plan *plant,fftw_plan *planc, 
+int *howmany, int *n, fftw_complex *in, fftw_real *out)
+{
+  int i;
+  for (i=0;i<(*howmany);i++) { 
+    fftw(*planc,*n/2+1,&(in[i*(*n)*(*n/2+1)]), 
+  	 *n/2+1,1,0,0,0);
+  }
+  transpose_mpi(*plant,(TRANSPOSE_EL_TYPE *)in,*n+2); 
+  rfftwnd_complex_to_real(*planr,*howmany,in,1,
+	  (*n)*(*n/2+1),out,1,
+	  (*n)*(*n));
+}
+
+
+
+
+
+
