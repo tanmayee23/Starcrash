@@ -1,0 +1,2948 @@
+\documentstyle[natbib,preprint,eqsecnum]{aastex}
+\bibliographystyle{apj}
+
+\begin{document}
+\title{StarCrash: A Parallel Smoothed Particle Hydrodynamics (SPH) Code for Calculating Stellar Interactions\\
+\vspace{0.5cm}Version 1.0}
+\author{Joshua Faber}
+\affil{Department of Physics and Astronomy, Northwestern University}
+\email{jfaber@northwestern.edu}
+\author{James C. Lombardi, Jr.}
+\affil{Department of Physics and Astronomy, Vassar College}
+\author{Frederic Rasio}
+\affil{Department of Physics and Astronomy, Northwestern University}
+\newpage
+\tableofcontents
+
+\newpage
+\section{Introduction}
+Hello, and welcome to the first public release of the StarCrash SPH-based
+parallel hydro code, developed and maintained by Joshua Faber, James Lombardi, and Fred
+Rasio.  We hope this instruction
+manual will allow you to make the most effective use of our code.   
+
+In the sections below, you will find installation instructions, 
+a description of the various
+parts of the code, starting with the theory behind SPH, continuing on
+to the techniques we have added to our code involving both
+parallelization and various physical effects, and concluding
+with a guide explaining how to use the code properly, as well
+as to add your own routines. 
+
+While this code is being freely distributed, we ask that you please
+give appropriate credit to those who have spent a great deal of time
+developing it.  If you are going to publish work done with this
+code, please see Sec.~\ref{legal} for the proper references to cite, as
+well as the license agreement we are using, the rather ubiquitous Gnu
+General Public License (GPL). 
+
+\newpage
+\section{Installation Instructions}
+\label{ii}
+We have prepared the release version of the code to work on as wide an
+array of systems as possible.  This version assumes that your computer
+system is a parallel system running MPI, the Message Passing
+Interface.  Several versions of MPI are in common use, and we have
+successfully compiled our code against many of them. 
+
+For our code to run properly with self-gravity, you
+will need to install one freely available software library.  It is the
+FFTW (Fastest Fourier Transform in the West) 
+library, written by Mateo Frigo and Steven Johnson, available for
+download at {\tt http://www.fftw.org}, and described in \citet{fftw2,fftw1}.  
+It is, to the best of our
+knowledge, the most widely used free, MPI-parallelized,
+multi-dimensional FFT code available, and forms the central part of
+our gravity solver.  Our code is currently compiled 
+against Version 2.1.5 of the FFTW, and will not work properly by
+default with older releases.  See the notes below, however, for the
+steps to follow in this case, specifically release 2.0 of the FFTW.   
+We are currently investigating the use
+of our code with the newly released FFTW version 3.0, and will update
+this documentation when and if we decide to write it into our code.  Currently,
+FFTW 3.0 does not support MPI-based parallelization, but this may
+change in the future.  
+
+The FFTW {\tt configure} routine does not compile the MPI-based
+routines by default.  Make sure to run {\tt configure} with the option
+{\tt --enable-mpi}.  You may need to set change your system flags to
+get FFTW to compile properly with the MPI-based routines included.
+See their documentation for details.
+
+Once you have installed the FFTW, you are ready to install the SPH code.  To
+do so, just follow these simple instructions, and everything should
+work smoothly.
+
+\begin{enumerate}
+\item First, unpack the tarball file, {\tt starcrash.tar.gz}, into the
+directory which will hold all the files. 
+\item Next, you will need to edit the {\tt makefile}.  Set the
+variable {\tt MPID} to the {\tt /include/} subdirectory of the MPI
+distribution you will be using.  Set {\tt FFTDIR} to the main
+directory of the FFTW, which should have subdirectories named {\tt
+/rfftw/} and {\tt /mpi/}.  Please note if you are using an older
+version of the FFTW (version 2.0.x), it may have a slightly different subdirectory
+structure.  If you believe this to be the case, try using the file
+{\tt makefile.old}.  Edit the variables {\tt FC} and {\tt CC} with the
+name of your preferred Fortran and C Compilers, and set the other
+variables to match your preferred compilation flags.   
+\item Now, make the executables.  The file which runs the StarCrash
+code is named {\tt sphagr}.  The routine {\tt testinput}, described in
+Sec.~\ref{in:test}, will help you generate the input files needed to
+run the code.  The routines {\tt b2pos} and {\tt b2pos2} help you
+convert our binary output files into ASCII files which can be read
+into other runs, and are easily converted into general-purpose I/O
+tools for use in data analysis. 
+\end{enumerate}
+
+Hopefully, your installation should now be complete.  Enjoy the StarCrash code!
+
+\newpage
+\section{Numerical Methods}
+\label {nm}
+\subsection{SPH: Smoothed Particle Hydrodynamics}
+\label{nm:sph}
+\subsubsection{SPH History and Basics}\label{nm:sph:hb}
+The basic Smoothed Particle Hydrodynamics (SPH) method was created 
+by \citet{Lucy} and \citet{GM} in order 
+to study fission in rotating stars.  It has since been used to study,
+among other 
+astrophysical topics, large scale structure in the universe, 
+galaxy formation, star formation, supernovae,
+solar system formation, tidal disruption of stars by massive black
+holes, and stellar collisions; see \citet{RS1}, \citet{Mon1992}, 
+and \citet{Ras1999} for a more complete list of references.  
+Our particular code has been used primarily in the study of stellar
+collisions and mergers, including merging compact object binaries \citep{RS1,RS2,RS3},
+collisions involving main sequence stars
+\citep{RS1991,LRS1993,Sills1997,Sills2001}, 
+blue-straggler formation \citep{LomRS1995,LOMRS1,Lom2002}, and most
+recently post-Newtonian 
+(PN) and relativistic 
+studies of binary neutron star (NS) systems \citep{FR1,FR2,FR3}.  A post-Newtonian code is in
+preparation for public release, and will form the core of version 2.0 of this
+code.   
+
+Because of its Lagrangian nature,
+SPH presents some clear advantages over more traditional 
+grid-based methods for calculations of stellar interactions. Most
+importantly, fluid advection, even for stars with a sharply defined surface
+such as NS, is accomplished without difficulty in SPH, since the
+particles simply follow their trajectories in the flow. In contrast, 
+to track accurately the orbital motion of two stars across a large 3D grid
+can be quite tricky, and the stellar surfaces then require a special
+treatment (to avoid ``bleeding''). SPH is
+also very computationally efficient, since it concentrates the
+numerical elements (particles) where the fluid is at all times,
+not wasting any resources on emty regions of space. For
+this reason, with given computational resources, SPH provides higher
+averaged spatial resolution than grid-based calculations, although
+Godunov-type schemes such as PPM typically provide better 
+resolution of shock fronts (this is certainly not a decisive advantage for
+binary coalescence calculations, where no strong shocks ever develop).
+SPH also makes it easy to track the hydrodynamic ejection of matter to 
+large distances from the central dense regions. Sophisticated nested-grid 
+algorithms are necessary to accomplish the same with grid-based
+methods. 
+
+\subsubsection{The SPH Density: Kernels, Sums, and Special Tricks}
+\label{nm:sph:rho}
+A good description of the particular SPH algorithm implemented in our code
+can be found in \citet{RS1}.  
+We summarize here the salient features of the
+method.  In what follows, the letters $i$ and $j$ refer to
+hydrodynamical quantities defined for each particle, and
+
+The key advance of SPH is to associate with each particle a ``smoothing
+length'' $h$, representing the finite spatial extent of the
+particle, which 
+can differ in value for separate particles, as well as vary in time.
+The smoothing length is used in calculating all hydrodynamic terms,
+since rather than viewing the density of the particle as a spatial
+delta-function, we represent the spatial density distribution of particle
+``$i$'' by a kernel function, such that 
+\begin{equation}
+\rho_i(\vec{r})=m_i W(|\vec{r}-\vec{r}_i|,h),
+\end{equation}
+where $\vec{r}_i$ is the actual position of particle $i$, and $W$ is a
+kernel function. 
+
+For the method to work, it is necessary that this kernel function have
+compact support, and the kernel function be at least singly
+differentiable.  In practice, we define the kernel function $W$ such
+that it drops to zero at a radius equal to 2 smoothing lengths, and we
+choose a function which is actually $C^2$.  The choice we use is defined
+as follows 
+\begin{equation}
+W(r,h)={1\over\pi h^3}\cases{1-{3\over2}\left({r\over h}\right)^2
+      +{3\over4}\left({r\over h}\right)^3,& $0\le{r\over h}<1$,\cr
+ {1\over4}\left[2-\left({r\over h}\right)\right]^3,& $1\le{r\over
+ h}<2$,\cr
+      0,& ${r\over h}\ge2$.\cr}\label{eq:kern}
+\end{equation}
+To save time, we calculate this function at the beginning of a run and store it
+in tabulated form.
+
+As the final results of the SPH evolution calculation should not depend on the 
+prescription for choosing the smoothing length $h$, we are free to 
+choose a convenient expression.  In practice, we let $h$ evolve over time
+such that the particle overlaps a fixed number of neighbors, a parameter 
+set prior to starting the calculation.
+
+By using this formulation, our realization of a fluid configuration
+into particles results in a well-defined, continuous and
+differentiable density field which can be evaluated at every point in
+space.  The density at an arbitrary point is given in terms of a sum over
+all neighboring particles which overlap the point, denoted here by ``$j$'', as:
+\begin{equation}
+\rho(\vec{r})=\sum_j m_j W(|\vec{r}-\vec{r_j}|,h_j).
+\end{equation}
+
+The SPH method allows us to calculate the density at each particle
+position following the formula above, but in practice we alter the formula
+slightly, by taking the average smoothing kernel function computed for
+the particle and its neighbor, finding
+\begin{eqnarray}
+\rho_i&=& \sum_j m_j
+\frac{W(|\vec{r}_i-\vec{r}_j|,h_i)+W(|\vec{r}_i-\vec{r}_j|,h_j)}{2}\nonumber\\
+&\equiv& \sum_j m_j W_{ij},    
+\end{eqnarray}
+where we define the quantity $W_{ij}$ to be the averaged smoothing
+kernel function.  Furthermore, we modify even this equation slightly
+during computations, in order to ensure momentum conservation.  It
+turns out that the property of ``neighborhood" is not exactly
+reflexive, i.e.,   particle $j$ can be a neighbor to particle $i$, but
+particle $i$ is not a neighbor  to particle $j$, since the two
+particles have different smoothing lengths.  Because of  this, we
+implement a nice trick when computing the density according to the
+the formula above.  If particle $j$ is a neighbor to particle $i$, we
+calculate the first half of $W_{ij}$, i.e. the term involving $h_i$,
+and add it to the sum for both particle $i$ and $j$.  After all, this
+value is just the second half of $W_{ij}$ for particle $j$.  If
+particle $i$ is in turn a neighbor to particle $j$, we pick up the
+second half of the density expression involving $h_j$ later.  Although
+this may sound complicated, we have tested it numerous times, and it
+does in the end  
+produce the right answer.  If you
+will, you can think of it as a way to enforce the balances demanded by
+Newton's laws on a numerical level.  In the
+comments to the code, this method is referred to as a ``gather-scatter''
+technique.    
+
+\subsubsection{Parallelization of the Hydro Routines}
+\label{nm:sph:pa}
+As this is a parallel code, we divide up this task among processors
+in a rather straightforward way.  In everything which follows, ``{\tt
+NPROCS}'' represents the number of processors used in the calculation.
+First, we break up the $N$ particles
+into {\tt NPROCS} subsets, each with approximately the same number of
+particles.  As an example, for a simulation with 10,000 particles and
+four processors, we define the lower and upper limits ``${\tt n\_lower}$''
+and ``${\tt n\_upper}$'' for each MPI process such that the rank 0
+process has values of $1$ and $2500$, respectively, rank 1 has $2501$
+and $5000$, etc.  Each processor is responsible for the piece of the
+total particle summation defined by ${\tt n\_lower} \le i \le {\tt
+n\_upper}$.  Note that since there is no restriction on particle $j$,
+our ``gather-scatter'' method can contribute density contributions to
+particles within the processor's particle range as well as to
+particles outside of the range, defeating efforts to use HPF-style
+``{\tt DO INDEPENDENT}'' formulations.  After the partial sums are
+calculated, we use a ``{\tt MPI\_ALLREDUCE}'' command to total up the
+partial sums and redistribute all of the values to all of the processors.
+
+The routine we use to calculate the ranges of particles fow which each processor
+is responsible is ``{\tt GRAVQUANT}'', which also calculates the
+sectioning of the 3-d gravity for input into our FFT algorithm,
+discussed below in Sec.~\ref{nm:gr:pa}.  It is ABSOLUTELY necessary
+to call {\tt GRAVQUANT} when starting the SPH code, without exceptions.  
+See Sec.~\ref{in} on initial conditions for more on this topic. 
+\subsubsection{Derivatives in SPH}
+\label{nm:sph:de}
+For other hydrodynamic quantities $q$, defined
+for every particle $q_i$, can be calculated at arbitrary points in
+space by a corresponding equation 
+\begin{equation}
+q_i=\sum_j m_j \frac{q_j}{\rho_j} W_{ij},
+\end{equation}
+using the gather-scatter method as described above.  We find that
+essentially any extensive quantity can be calculated as a density
+wieghted sum.  For intensive quantities, simply multiply by the
+density in the SPH sum, and then divide by the density.  For instance,
+the SPH averaged velocity at a particle position can be given as 
+\begin{equation}
+v_i=\frac{(\rho v)_i}{\rho_i}=\frac{1}{\rho_i}\sum_j m_j v_j W_{ij}.
+\end{equation}
+
+Perhaps more importantly, the SPH method allows us to calculate not
+just hydro quantities, but their spatial derivatives as well, such as
+in the Newtonian force law $F_{hydro}=\nabla P/\rho$.  We define the
+derivative of a hydro quantity ``$q$'' by using the chain rule, finding
+that 
+\begin{equation}
+\nabla q_i=\sum_j m_j
+\frac{q_j}{\rho_j}\nabla W_{ij}, 
+\end{equation}
+where all terms in the expression, most importantly the derivative, 
+are well-defined.  As an example of this approach in action, the
+standard Newtonian fluid acceleration is calculated by the SPH code as
+\begin{eqnarray}
+\vec{a}_{hydro}=\frac{1}{\rho}\nabla P &=&
+\nabla (P/\rho) + \frac{P}{\rho^2}\nabla \rho\nonumber\\
+&=&\sum_j m_j\frac{P_j}{\rho_j^2}\nabla
+W_{ij}+\frac{P_i}{\rho_i^2}\sum_j m_j\nabla W_{ij}\nonumber\\   
+&=& \sum_j
+m_j\left(\frac{P_j}{\rho_j^2}+\frac{P_i}{\rho_i^2}\right)\nabla W_{ij}.
+\end{eqnarray}
+The code currently assumes a polytropic form for the equation of
+state, i.e. $P_i=A_i \rho_i^\Gamma$, where $\Gamma$ is a constant, and
+$A_i$, our entropic variable, is constant unless an artificial
+viscosity prescription is used.  For more on this, see Sec.~\ref{nm:av}.
+
+\subsubsection{Evolving Quantities in Time}
+\label{nm:sph:ev}
+The equations of motion for SPH particles are relatively simple, since
+particles have well-defined positions, velocities, and accelerations.
+We calculate a timestep which satisfies the Courant stability
+conditions, picking it to be sufficiently small compared to the
+typical
+\begin{itemize}
+\item Sound crossing time for a particle, $h_i/c_s$, where the speed of
+sound $c_s$ is given by $c_s^2\equiv (\partial P/\partial\rho)_A$
+\item Accelerative timescale for a particle, $\sqrt{(h_i/a_i)}$.
+\end{itemize}
+
+These steps help to ensure accuracy, but we do slightly better.  To
+increase our numerical accuracy, we use a second-order ``leapfrog''
+approach during each timestep.  At the beginning of a run, we advance
+the velocities half a timestep.  In each succeeding iteration, we
+first advance the particles' positions half a timestep using the
+velocity value already calculated for mid-timestep, calculate the
+rate of change of the entropy at the mid-timestep if AV is being
+used, and then advance the particles to the end of the step. We go
+back, advance the velocities half an iteration with the old values of
+the acceleration, recalculate the accelerations (which are weakly
+velocity-dependent), and advance the velocities a full time-step from
+the old values.  Essentially, this method reproduces the second order
+Runge-Kutta approach, while consistently updating all the other things
+that make the code work. Please note that we adjust everything back
+to a consistent reference time when producing output files. 
+
+\subsection{Neighbor Lists}
+\label{nm:nl}
+The sums used in the SPH expressions above are dependent on each particle's
+kernel function, which in turn depends on each particle's smoothing
+length.  How do we determine what it should be, and how it will evolve
+over time?  Our method works by defining an optimal number of
+neighbors for each particle.  This value is set by the user in the
+input files (see Sec.~\ref{io:in:input}) by the parameter {\tt NNOPT}.
+The kernel function of the particle, a
+sphere with radius equal to 2 smoothing lengths, ideally will overlap
+precisely this number of other particles.  In practice, we use a
+relaxation technique, such that a every iteration of the code, the
+smoothing length is set equal to the arithmetic mean of the previous
+value and the power law estimate of the new value, thus
+\begin{equation}
+h_{new}=\frac{1}{2}h_{old}\times
+\left[1+\left(\frac{N_{opt}}{N_N}\right)^{\frac{1}{3}}\right].\label{eq:hpnew} 
+\end{equation}
+In many cases, it is advisable to place limits on the minimum and
+maximum smoothing length allowed in the calculation.  In practice, we
+have found that a minimum value is generally unnecessary, and setting
+a fixed floor could lead to particles in high-density regions reaching
+the maximum number of neighbors allowed in memory before all
+overlapping particles are reached.  Setting a maximum is often
+important, since smoothing lengths grow dramatically when particles
+find themselves alone, and in this limit the SPH density kernel
+inherently does a poor job of describing the local density field.
+Typically, setting the maximum smoothing length to be comparable to the
+stellar radius is appropriate.  The maximum and minimum smoothing
+lengths are set with the parameters ``{\tt HMAX}'' and ``{\tt HMIN}'',
+respectively.  Setting ${\tt HMIN}<0$ tells the code there is no fixed
+minimum for the smoothing length. 
+
+To determine which
+particles neighbor each other, we use a linked list/head-of-cell
+method.  First, we define both an integer vector with one entry for
+every particle and a 3-dimensional integer grid around the matter,
+whose size is set by the parameters {\tt NCMX, NCMY}, and {\tt NCMZ}
+in the file {\tt nelist.f}.  The physical extent represented by each
+grid cell in each direction is calculated by 
+taking the average smoothing length for all particles, and multiplying
+by a factor of $1.3$ (this just works faster).  Once the grid
+dimensions are defined, we run a loop over all the particles in the
+simulation, calculating the grid cell in which each one lies.  If the
+particle is the {\em first} one to fall in its grid cell, we enter its
+number into the grid.  If there are already one or more particles in
+the grid cell, we copy the old particle's number to the vector in the
+new particle's slot, and enter the new particle's number in the grid
+cell.  When we are done, the algorithm to find every particle in a
+given grid cell is simple: the number written in the grid cell, $i_1$,
+is the highest-numbered particle which lies in the cell.  The $i_1$th
+element of the vector contains $i_2$, the next-highest numbered
+particle in the cell.  By making our way through the vector, we
+recover all particles in the cell, until we reach an element in the
+vector containing zero, indicating that the cell has been accounted
+for completely.
+
+Next, we go through the process of assembling the neighbor lists for
+each particle.  For each particle, we loop over all grid cells which
+may lie within two smoothing lengths of the particle, and determine
+for every particle in the cell whether this is the case.  For each
+particle meeting the criterion, we record its value in the array
+``{\tt NNI}''.  Since all hydrodynamical interactions are parallelized
+as described in Sec.~\ref{nm:sph:pa}, 
+we only record the neighbor lists spanning
+particles with ${\tt n\_lower} < i < {\tt n\_upper}$ on each processor.
+We also keep track of the number of neighbors each particle has, ${\tt
+NN}$, but in a way such that every processor has access to the
+complete list for all particles.  
+
+\subsubsection{Neighbor Lists: Parallel Issues and Particles Off the Grid}
+\label{nm:nl:pa}
+If the 3-d head-of-cell grid is not
+large enough in a particular dimension to contain all the particles,
+it centers the grid in that direction about zero, and prints out a
+warning of the form ``{\tt Warning! NELIST: EXC true in ...}'', listing
+the relevant dimension(s), as well as the number of grid cells which
+would have been required to fit all the particles and the current
+maximum.  
+
+In some cases, setting these grid dimensions to be symmetric around
+zero may be inappropriate for what you want to do, and you should
+change the algorithm accordingly.  
+
+The code can run perfectly well when particles fall outside the
+neighbor grids.  If this happens, the code will produce a warning
+``{\tt NELIST: WARNING !!! NPOUT=}'' listing the number of particles
+outside the grid.  These particles will have no neighbors, and will
+not play a role in any hydrodynamic interactions.  They will, however,
+be accounted for in gravitational interactions (see Sec.~\ref{nm:gr} for more
+on this).
+
+\subsection{The Gravity Solver: an FFT-based Approach}
+\label{nm:gr}
+\subsubsection{FFT Convolution}\label{nm:gr:fft}
+There are SPH techniques which can be used to solve for the
+gravitational force on each particle, but we have found it easiest to
+use FFT convolution to calculate the gravitational potential and
+force for each particle.  Note that according to Newton's law, the
+gravitational potential $\Phi$ satisfies an equation 
+\begin{equation}
+\Phi(\vec{r})= \int \rho({\vec{r}}')
+\frac{d^3 {\vec{r}}'}{|\vec{r}-{\vec{r}}'|} = 
+\sum_i \frac{m_i}{|\vec{r}-\vec{r}_i|} .
+\end{equation}
+
+The direct sum requires $N^2$ operations, and is unfeasible to
+implement.  The integral, on the other hand, is in the form of a
+convolution, and we find 
+\begin{equation}
+\Phi(r)={\rm FFT}^{-1}\times 
+\left[{\rm FFT}(\rho)*{\rm FFT}\left(\frac{1}{r}\right)\right].
+\end{equation}
+To use FFT convolution techniques, we have to import the data to a
+3-dimensional grid.  Setting the boundaries for this grid is a topic
+worthy of some explanation, and can have significant effects on both
+the performance and accuracy of the code.  Essentially, if the grid
+covers too large a spatial volume, the matter becomes concentrated in
+fewer cells, and we lose the sharpness of our solution for the
+gravitational force and potential.  If the grid is too small, though,
+particles can be lost off the edges, which in some cases can be a
+problem.  Resizing the grid allows for flexibility, but requires doing
+a third FFT (that of $1/r$) every timestep in addition to that of the
+matter and the inverse FFT of the potential, adding up to $50\%$ to
+the time required to compute the gravitational field.  If the grid
+spacing is known to be constant, we can calculate the FFT of $1/r$,
+save the result, and reuse it over and over again.
+In all cases, the dimensions of the grid are fixed in advance, by the
+parameter ``{\tt NGRAV}'' in the header file, representing the size of
+the grid devoted to the matter.  The actual size of the
+grid is ${\tt NNGRAV}^3\equiv (2 \times{\tt NGRAV})^3$, since convolution
+techniques require double the size in every dimension to properly
+calculate the potential, a process known as ``zero-padding''.  
+If you will, the convolution has to account
+for the fact that one particle can be located across the grid all the
+way to the right, or all the way to the left, so the range of values
+of $\vec{x}_i-\vec{x}_j$ spans a length twice that of the size of the grid.  It
+will come as no surprise that the FFT works dramatically better if
+{\tt NGRAV} is chosen to be a power of two, or at least contains
+nothing but small prime factors.  The FFTW can handle multiples of 5
+as well as other small primes, but at a huge loss of computational speed.
+
+When calculating the density at each grid vertex, we use a
+``cloud-in-cell'' method, whereby the mass contributions from any
+given particle are attributed to the eight vertices surrounding by means
+of a weighting function which contains the product of three terms,
+each of which are linear in a dimension, with the total weighting
+normalized to unity.  If a particle is respectively $25\%, 40\%$, and
+$70\%$ of the way across the cell from the lower front left corner in
+the three dimensions, we attribute $0.75\times 0.6\times 0.3$ of the
+particle's mass to that corner. 
+
+After calculating the gravitational potential at each vertex, we
+finite difference to find the gravitational force at each vertex.
+The potential and gravitational force are interpolated for each
+particle using the ``cloud-in-cell'' technique described above, with
+the same weightings used on the way out as were used on the way in.
+
+Particles not on the grid are flagged, and a warning will be printed
+saying ``{\tt QGRAV: NPOUT=...  AMIN=}'', where {\tt NPOUT} is the
+number of particles off the grid, and {\tt AMIN} is the total mass of
+particles located within the grid.  For particles off the grid,
+gravitational terms are calculated between them and particles on the
+grid (but not among particles off the grid) via a simple monopole
+approximation. 
+
+\subsubsection{Built-in Gravity Grid Options}
+\label{nm:gr:bi}
+We have several built-in options for the code, to cover a variety of
+situations.  They are defined in the input files by the
+parameter ``{\tt NGR}'', as well as the parameters ``{\tt XGRMAX,
+XGRMIN, XGRLIM,} etc.''  They work as follows:
+\begin{itemize}
+\item ${\tt NGR}=0$: No self-gravity at all
+\item ${\tt NGR}=1$: Fixed gravity grid, running from ${\tt XGRMIN}< x <
+{\tt XGRMAX}$, ${\tt YGRMIN}< y < {\tt YGRMAX}$, and ${\tt ZGRMIN}< z
+< {\tt ZGRMAX}$. 
+\item ${\tt NGR}=2$: The gravity grid will be adjusted every timestep to 
+cover {\em all} of the particles, no
+matter how far from the origin or each other.
+\item ${\tt NGR}=21$: Initially like ${\tt NGR}=2$, but after a certain time
+``{\tt TGR}'' has passed, switch to ${\tt NGR}=1$, with ${\tt -XGRLIM}< x <
+{\tt XGRLIM}$, ${\tt -YGRLIM}< y < {\tt YGRLIM}$, and ${\tt -ZGRLIM }< z
+< {\tt ZGRLIM}$.
+\item $90 \le {\tt NGR} \le 99$: Like ${\tt NGR}=1$ 
+at first, with ${\tt -XGRLIM}< x <
+{\tt XGRLIM}$, ${\tt -YGRLIM}< y < {\tt YGRLIM}$, and ${\tt -ZGRLIM}< z
+< {\tt ZGRLIM}$.  Sets the grid boundaries to contain 
+${\tt NGR} \%$ of the total mass of the matter in a given dimension once a particle leaves 
+the range ${\tt -XGRLIM}< x < {\tt XGRLIM}$, etc.
+\item $290 \le {\tt NGR} \le 299$: Like ${\tt NGR}=2$ until {\em any} particle
+leaves the box defined by ${\tt -XGRLIM}< x <
+{\tt XGRLIM}$, ${\tt -YGRLIM}< y < {\tt YGRLIM}$, and ${\tt -ZGRLIM }< z
+< {\tt ZGRLIM}$.  From that point onwards, {\tt NGR} is changed to a new value $({\tt NGR}-200)$.
+\item ${\tt NGR}=398$: Like ${\tt NGR}=98$, but the grid cannot expand
+indefinitely.  The boundaries are constrained such that ${\tt XGRMIN} \ge
+-2\times {\tt XGRLIM}$, ${\tt XGRMAX} \le 2\times {\tt XGRLIM}$, etc.
+\end{itemize}
+
+\subsubsection{Gravity Grid Parallelization}
+\label{nm:gr:pa}
+Whereas we tend to divide up our list of particles among processors
+to parallelize hydro routines, we are forced to divide up our gravity
+grids among processors spatially.  For its parallel FFT routines,
+the FFTW requires that all grids be divided equally along the first
+dimension of the grid, but it is VITAL to note that the FFTW is
+written in C.  Since C and Fortran use opposite notations for indexing
+vectors, C stepping along the last index and Fortran along the first,
+this means that in the Fortran part of the code we must break up the
+grids passed to the FFTW in the z-direction.  Thus, all grids in the
+gravity routine have dimensions {\tt NNGRAV}x{\tt NNGRAV}x{\tt NNP}, where
+${\tt NNP}={\tt NNGRAV}/{\tt NPROCS}$.  This is straightforward when
+inputting values onto the grids, but harder when outputting values
+back to the particles.  We keep careful track of the z-coordinate of
+vertices whose values contribute to the potential or force of a given
+particle, only summing those that lie on a given processor, before
+using an {\tt MPI\_ALLREDUCE} to gather the sums properly.
+
+The sectioning of the 3-d grids sent to the parallel 3-d FFT algorithm
+is computed in the subroutine ``{\tt GRAVQUANT}'', which is invoked
+from all of the initialization subroutines.  See Sec.~\ref{in} on initial
+conditions for more on the topic.
+
+\subsubsection{The FFTW}
+\label{nm:gr:fftw}
+While the FFTW webpage contains extensive documentation on how it
+works and why it is so flexible, we feel it is appropriate to comment
+on the way in which we implement it.
+
+The FFTW, like many numerical FFT codes, requires two different types
+of calls.  First, the parameters are passed to it so it can properly
+allocate memory.  Second, the actual FFT is computed.
+
+During the first iteration of the code, we invoke the subroutine
+``{\tt makeplans}'', which proceeds to call out all the plans we will
+need later.  Since these are stored as pointers in the C-language part
+of the code, they are treated by Fortran as if they are integers.
+Attempting to display the plans in the Fortran code will yield you
+nothing more than a memory address.
+
+Next, the Fortran code calls out the routines ``{\tt rcfft}'' for the
+real-to-complex, 3-d forward FFTs, and ``{\tt crfft}'' for the 
+complex-to-real, 3-D inverse FFTs.  These routines, written by us based on
+templates found within the FFT release, actually do several important
+steps.
+
+For the forward FFTs, we first run a 2-d real-to-complex transform on
+the dimensions which are stored completely within each processor.
+This step requires no communication whatsoever between processors.
+Next, we call on an MPI-based transpose routine found within the FFTW
+code, though not within the libraries.  This transpose switches two of
+the dimensions of the array, so the untransformed dimension now lies
+within a processor, rather than across all of them.  Finally, we run a
+1-dimensional complex-to-complex transform on this last dimension.
+The resultant complex data structure is left in the transposed form,
+since the transpose is undone by the inverse FFT.  
+
+The inverse FFT works in essentially the opposite order.  We inverse
+FFT the second dimension within each processor, transpose the grid
+back to the original form, and run a 2-d complex-to-real transform
+within each processor on the remaining dimensions.
+
+It is extremely important to note that the authors of the FFTW have
+changed the format of the transpose routines between the previous
+releases and the current one.  If you must use an older version of the
+FFTW (version 2.0.x), please replace our file ``{\tt fftw\_f77.c}'' with ``{\tt
+fftw\_f77.c.old}''.  The only difference is in the calling sequence of
+variables, the calculation is performed in the same way for either case.
+
+It is VITAL to get the subroutine name syntax right when calling a routine in C from a
+routine in Fortran.  We have encountered problems in the past with
+any C-based subroutine which has an underscore character in
+its name (i.e. {\tt make\_plans} instead of {\tt makeplans}).  Consider yourself warned.
+\subsection{Relaxation}
+\label{nm:re}
+A common problem with SPH codes is the fact that the initial
+configuration of particles you lay down will be to some extent out of
+equilibrium.  In some case, the resulting oscillations of the matter
+can lead to spurious results.  As a result, we recommend that whenever
+it is possible, you use our routines to relax a material
+configuration before computing a dynamical run.  We currently have two
+such routines, for both single-stars and corotating binaries.  We
+discuss each in turn, but the idea behind each is essentially the
+same.  For equilibrium situations where the matter is fixed in a given
+reference frame, you calculate forces by the standard techniques, but
+add a drag term to the accelerations, such that
+\begin{equation}
+\frac{d\vec{v}}{dt}=\vec{a}-\frac{\vec{v}}{t_{relax}}.\label{eq:relax1}
+\end{equation}
+The relaxation time, $t_{relax}$ is input to the code as a parameter
+{\tt TRELAX}, and should correspond roughly with the dynamical
+timescale of the system, given by $t_d\equiv
+1/\sqrt{G\rho}\approx\sqrt{R^3/GM}$,  in order to ensure nearly
+critical damping. 
+
+In all cases, we turn off the dissipative effects of both artificial
+viscosity (Sec.~\ref{nm:av}) and radiation reaction (Sec.~\ref{nm:rr}) 
+during relaxation.
+
+\subsubsection{Single Stars}
+\label{nm:re:1s}
+In many cases, the first thing to do with the SPH code is to calculate
+a single-star model, which can be used later either by itself or in a
+multi-body system.  The SPH code 
+contains two subroutines which create single stars.  One uses
+equal-mass SPH particles, which are laid down Monte-Carlo style, based
+on a weighting function calculated for the density profile you choose.
+The other sets up a hexagonal close-packed array of particles, with
+constant grid spacing, but with particles of varying mass.  The latter
+approach gives better resolution for the outer edge of each star, but
+can be vulnerable to spurious mass segregation within collision remnants, as
+heavier particles fall into the regions with the largest gravitational
+potential.  For either case, we recommend you relax the model by
+setting the parameter {\tt NRELAX}=1, yielding a damping equation
+exactly like the one above.  Typically, you should calculate for
+several relaxation times before treating a configuration as relaxed.
+
+To ensure that the configuration computed during relaxation will work
+properly during later calculations, we make sure to adjust the center
+of mass of the matter during each timestep so that it is located at
+the origin.
+
+\subsubsection{Binary Stars}
+\label{nm:re:2s}
+The SPH code has routines to create binaries with both irrotational
+and corotating velocity profiles.  For the former case, there is no
+fixed reference frame in which the material is stationary, and we have 
+not yet implemented a way to relax the matter configuration exactly.
+For ways of calculating these configurations, see, e.g.,
+\citet{GGTMB,TGB,TG}, and references therein.  
+
+On the other hand, 
+binary stars in corotation, also known as synchronized binaries, can
+be relaxed, since they are static in a frame which rotates
+with the same angular frequency as the matter.  For this case, called
+by setting the parameter {\tt NRELAX}=2, the
+code adds in a false centrifugal force, to handle the rotation of the
+frame, yielding a force law for quantities in the corotating frame
+\begin{equation}
+\frac{d\vec{v}}{dt}=\vec{a}+\Omega^2 \vec{r}-\frac{\vec{v}}{t_{relax}},
+\label{eq:relax2}
+\end{equation}
+where we calculate the corotating frame's angular velocity by taking
+the average of
+the net forces on each component of the binary divided by the
+distance from the origin to the center of mass of each component.   
+Note that this routine works for a given binary separation, which is
+given by the input parameter {\tt SEP0}.  After each timestep, we
+shift the positions of both stars very slightly to keep the center of
+mass separation at the proper value, with the system center of mass at
+the origin.  It is possible to edit the
+code to produce a relaxed sequence with a smoothly varying separation,
+by defining a new separation variable and replacing references to {\tt
+SEP0} in the relaxation subroutines.  See the file {\tt sepscan.f} for 
+an example of this.
+
+We have subroutines that can take either a relaxed single-star
+model and place it in a binary, or create both stars from scratch,
+with either equal-mass or equally-spaced particles, like before.  The
+code can also handle binaries for which the stars have different
+masses.  Note that in this case, if you wish to use models of relaxed
+single stars, you will have to calculate each separately. 
+
+\subsubsection{Finishing Relaxation}  
+\label{nm:re:fi}
+It is possible to start a dynamical run after relaxation finishes
+without starting the code.  The parameter ``{\tt TRELOFF}'' gives the time
+at which relaxation finishes, and if this is less than the time at
+which the run itself finishes, ``{\tt TF}'', the code will switch to a
+dynamical mode, turning on the effects of AV and radiation reaction if
+the user indicated they should be used.
+
+For a single star configuration the process is extremely simple.  All
+velocities are set to zero and the run is relaunched.  For the
+corotating binary case,  All velocities are set such that
+\begin{equation}
+\vec{v}=\vec{\Omega}\times\vec{r},
+\end{equation}
+where $\vec{\Omega}$ is taken to point in the z-direction.  Note that
+this approach eliminates all spurious velocities which had yet to damp out.
+
+\subsection{Artificial Viscosity}
+\label{nm:av}
+As we mentioned before, so long as the evolution of matter is
+completely adiabatic, the entropic variable $A_i$, found from the
+polytropic equation of state $P_i=A_i\rho_i^\Gamma$, remains
+constant.  For most physical systems, however, this is a poor
+assumption.  Several different techniques have been developed to deal
+with this situation, by adding an ``artificial viscosity'', or ``AV'',
+which damps the velocity of converging matter flows while heating up
+the material (thus increasing $A_i$).  Our code includes three such
+prescriptions, all of which are described in great detail in
+\citet{LSRS}.  We recommend giving this article a thorough perusal
+before using the AV schemes.
+
+No matter which AV scheme is used, the effect on various quantities is
+determined from the laws of thermodynamics.  Essentially, for an
+SPH artificial viscosity term $\Pi_{ij}$, if the viscous acceleration of the
+matter is given by 
+\begin{equation}
+\vec{a}_{AV}=\sum_j m_j \Pi_{ij}\nabla W_{ij},\label{eq:vdot} 
+\end{equation}
+then the entropy equation will read
+\begin{equation}
+\frac{dA_i}{dt}=\frac{\Gamma-1}{2\rho_i^{\Gamma-1}}\sum_j m_j \Pi_{ij}
+(\vec{v}_i-\vec{v}_j)\cdot \nabla W_{ij}.
+\label{eq:adot}
+\end{equation}
+
+\subsubsection{Monaghan}
+\label{nm:av:cl}
+The simplest form of the AV function is that of \citet{claAV},
+which combines a linear bulk velocity with a quadratic von
+Neumann-Richtmeyer viscosity.  It takes the form
+\begin{equation}
+\Pi_{ij}=\frac{-\alpha\mu_{ij}c_{ij}+\beta\mu_{ij}^2}{\rho_{ij}},
+\label{eq:cla1}
+\end{equation}
+where the speed of average sound speed is given by 
+\begin{equation}
+c_{ij}\equiv\frac{c_i+c_j}{2};
+~~c_i\equiv\left(\frac{\partial P_i}{\partial
+\rho_i}\right)^{\frac{1}{2}}_{A_i}=
+\left(\frac{\Gamma P_i}{\rho_i}\right)^{\frac{1}{2}}=(\Gamma A_i
+\rho_i^{\Gamma-1})^{\frac{1}{2}},\label{eq:cla2}
+\end{equation}
+the average density is $\rho_{ij}\equiv(\rho_i+\rho_j)/2$, and $\mu_{ij}$
+is a function which measures the velocity convergence, given by
+\begin{equation}
+\mu_{ij}=\cases{ {(\vec{v}_i-\vec{v}_j)\cdot(\vec{r}_i-\vec{r}_j)\over
+h_{ij}(|\vec{r}_i -\vec{r}_j|^2/h_{ij}^2+\eta^2)}& if
+$(\vec{v}_i-\vec{v}_j)\cdot(\vec{r}_i-\vec{r}_j)<0$,\cr
+0& if $(\vec{v}_i-\vec{v}_j)\cdot(\vec{r}_i-\vec{r}_j)\ge0$,\cr}\label{eq:cla3}
+\end{equation}
+where $h_{ij}\equiv(h_i+h_j)/2$ is the average smoothing length.
+The parameters $\alpha$, $\beta$, and $\eta^2$ are set in the input
+files as {\tt ALPHA}, {\tt BETA}, and {\tt ETA2}.  We recommend for
+most purposes $\alpha\approx0.5$, $\beta\approx1$, and $\eta^2\approx
+10^{-2}$, but see \citet{LSRS} for more discussion.
+
+\subsubsection{Hernquist and Katz}
+\label{nm:av:ne}
+Another form for the AV, introduced by \citet{newAV}
+calculates $\Pi_{ij}$ directly from the SPH estimate of the divergence
+of the velocity field:
+\begin{equation}
+\Pi_{ij}=\cases{ {q_i\over\rho_{i}^2}+{q_j\over\rho_{j}^2}& if
+                $(\vec{v}_i-\vec{v}_j)\cdot(\vec{r}_i-\vec{r}_j)<0$,\cr 0& if
+                $(\vec{v}_i-\vec{v}_j)\cdot(\vec{r}_i-\vec{r}_j)\ge0$,\cr} 
+\label{eq:new1}
+\end{equation}
+where
+\begin{equation}
+q_i=\cases{ \alpha \rho_i c_i h_i |\vec{\nabla}\cdot \vec{v}|_i+
+               \beta \rho_i h_i^2 |\vec{\nabla}\cdot \vec{v}|_i^2
+                 & if $\left(\vec{\nabla}\cdot \vec{v}\right)_i<0$,\cr
+                0& if $\left(\vec{\nabla}\cdot \vec{v}\right)_i\ge0$,\cr}
+\label{eq:new2}
+\end{equation}
+and
+\begin{equation}
+(\vec{\nabla}\cdot \vec{v})_i={1 \over \rho_i}\sum_j m_j
+        (\vec{v}_j-\vec{v}_i)\cdot\vec{\nabla} W_{ij}.\label{eq:divv}
+\end{equation}
+We recommend, with the standard caveats, setting
+$\alpha\approx\beta\approx0.5$.
+
+\subsubsection{Balsara}
+\label{nm:av:ba}
+Finally, we include the AV form developed by \citet{balAV}.  He
+suggests 
+\begin{equation}
+\Pi_{ij}=\left({p_i\over\rho_i^2}+{p_j\over\rho_j^2}\right)
+\left(-\alpha \mu_{ij} + \beta \mu_{ij}^2\right), \label{eq:bal1}
+\end{equation}
+where
+\begin{equation}
+\mu_{ij}=\cases{ {(\vec{v}_i-\vec{v}_j)\cdot(\vec{r}_i-\vec{r}_j)\over
+h_{ij}(|\vec{r}_i -\vec{r}_j|^2/h_{ij}^2+\eta^2)}{f_i+f_j \over 2
+c_{ij}}& if $(\vec{v}_i-\vec{v}_j)\cdot(\vec{r}_i-\vec{r}_j)<0$,\cr
+0& if $(\vec{v}_i-\vec{v}_j)\cdot(\vec{r}_i-\vec{r}_j)\ge0$.\cr}\label{eq:bal2}
+\end{equation}
+Here $f_i$ is the form function for particle $i$, defined by
+\begin{equation}
+f_i={|\vec{\nabla}\cdot \vec{v}|_i \over |\vec{\nabla}\cdot \vec{v}|_i
++|\vec{\nabla}\times \vec{v}|_i + \eta' c_i/h_i
+}, \label{eq:bal3}
+\end{equation}
+where the factor $\eta'=10^{-5}$ prevents numerical
+divergences, and
+\begin{equation}
+(\vec{\nabla}\times \vec{v})_i={1 \over \rho_i}\sum_j m_j
+        (\vec{v}_i-\vec{v}_j)\times\vec{\nabla} W_{ij}. \label{eq:curlv}
+\end{equation}
+The function $f_i$ acts as a switch, approaching unity in regions of
+strong compression ($|\vec{\nabla}\cdot \vec{v}|_i >>|
+\vec{\nabla}\times \vec{v}|_i$) and vanishing in regions of large
+vorticity 
+($|\vec{\nabla}\times \vec{v}|_i >>|\vec{\nabla}\cdot \vec{v}|_i$).
+Consequently, this AV has the advantage that it is suppressed in shear
+layers.  In our code, we set $\eta'=10^{-5}$, a choice which
+does not significantly affect our results.  Note that since
+$(p_i/\rho_i^2+p_j/\rho_j^2)\approx 2c_{ij}^2/(\Gamma\rho_{ij})$,
+Balsara's AV resembles Monaghan's AV when 
+$|\vec{\nabla}\cdot \vec{v}|_i >> |\vec{\nabla}\times \vec{v}|_i$, provided
+one rescales Balsara's $\alpha$ and $\beta$ in to be a
+factor of $\Gamma/2$ times the $\alpha$ and $\beta$ in Monaghan's.  
+We have taken this into account in the code, multiplying the AV term
+by a factor of $\Gamma/2$, so we recommend setting
+$\alpha\approx\beta\approx 1.0$ in the input files.
+
+\subsubsection{Parallelization of the AV Routines}
+\label{nm:av:pa}
+The AV routines are parallelized in a similar way to the other hydro
+routines.  Using the gather-scatter approach, we add half of the
+interaction between particles in turn to the AV force for each, 
+breaking up the work by
+having each processor loop over a subset of the particles.  Note that
+the gather-scatter technique used here guarantees that AV-related
+forces conserve both momentum and angular momentum up to machine
+precision.
+
+An important fact to note about using an AV prescription is that it
+can greatly reduce the size of the timestep when a shock forms.  In
+extreme cases, the timestep can become so small that the code
+effectively freezes.  Be on the lookout for this, and, if necessary,
+edit the timestep routine until acceptable stepsizes result, but
+beware spurious results. 
+
+\subsection{Gravitational Radiation Reaction}
+\label{nm:rr}
+Our SPH code has been used extensively to study the properties of
+colliding neutron stars.  In such systems, the general relativistic
+phenomenon of gravitational radiation losses can be very important.
+We include in our code a Newtonian-style treatment of radiation
+reaction, derived from the formalism of \citet{BDS}, 
+hereafter referred to as BDS, used by us \citep{FR1,FR2,FR3} and other groups
+\citep{RJS,RJTS,RRJ,APODR}.  
+It is consistent to lowest order, and more accurate than
+many slow-motion approaches, which are completely incapable of
+modeling the spatial dependence of the radiation reaction force.  
+
+To include radiation reaction, we make several changes to the code.
+The BDS form for the radiation reaction form is given by 
+\begin{equation}
+\vec{F}_{reac}=m_i\vec{a}_{reac}=m_i \frac{1}{c^5}\nabla  U_5,
+\label{eq:rr1}
+\end{equation}
+where $c$ is the speed of light in code units, and the relativistic
+potential $U_5$ is given by
+\begin{equation}
+U_5=\frac{2}{5}G\left(R-Q^{[3]}_{ab}x^a \frac{\partial\Phi}{\partial
+x^b}\right), \label{eq:rr2}
+\end{equation}
+where $G$ is the gravitational constant, set equal to $1.0$ in our
+code by definition.  Taking the derivative of the radiation reaction
+potential requires a second derivative of the standard gravitational
+potential $\Phi$, which we compute by finite differencing during a
+modified version of the gravity solver.  Here, $a$ and $b$ are spatial
+indices to be summed 
+over in a standard tensor product, i.e. they run from 1 to 3.  The
+third time derivative of the traceless quadrupole moment, $Q^{[3]}_{ab}$, is
+given by taking the time derivative of the second derivative, which
+itself can be expressed, as shown in \citet{RS1}, in SPH terms as 
+\begin{equation}
+Q^{[3]}_{ab}=\frac{d}{dt}Q^{[2]}_{ab}=\frac{d}{dt} {\rm STF}\left [\sum_j
+2m_j(v_j^a v_j^b +x_j^a a_{grav}^b)\right]\label{eq:rr3}.
+\end{equation}
+Note that this quantity is a scalar.
+``STF'' indicates to symmetrize and subtract away the trace of the
+tensor.  The gravitational acceleration on a particle is denoted
+$a_{grav}$.  The quantity $R$ which appears in the radiation
+reaction potential is a quantity whose value is given by solving a
+Poisson equation of the form
+\begin{equation}
+\nabla^2 R=-4\pi Q^{[3]}_{ab}x^a\frac{\partial \rho}{\partial x^b}.
+\label{eq:rr4}
+\end{equation}
+To solve this equation numerically, we finite difference the density
+field on the grid directly to get the gradient of the density, rather
+than import directly to the grid the gradient which can be calculated
+using SPH techniques.  We have found that this approach leads to a
+smoother and more realistic source term distribution
+
+Besides the computation of the radiation reaction force, we also have
+to adjust very slightly our velocity equation.
+The specific momentum $\vec{v}$, representing the quantity whose
+derivative with respect to time is given by the hydrodynamic, AV,
+gravitational, and radiation reaction forces, is not the same quantity
+in the BDS formalism as the velocity $\vec{u}\equiv d\vec{x}/dt$, as it
+is in Newtonian physics. Instead, we find
+\begin{equation}
+u^a=v^a+\frac{4}{5c^5} Q^{[3]}_{ab}v^b. \label{eq:rr5}
+\end{equation}
+Unfortunately, in order to keep our code simple, the notation we use
+does not match up with that used in the BDS paper.  What we call
+``$\vec{u}$'', they call ``$\vec{v}$'', and what we call ``$\vec{v}$'',
+they call ``$\vec{w}$''.  Please be careful if you feel the need to
+edit these routines. 
+
+To include radiation reaction in a run, you must set the input parameter
+{\tt NGRAVRAD}=1.  Compute the speed of light in the code units, since
+it is often not unity, and use this to set the parameter ``{\tt
+SOL}''.
+
+\newpage
+\section{Running a Calculation: Initial Routines}
+\label{in}
+All calculation using the SPH code are run using the executable ``{\tt
+sphagr}'', but you will need different input files to tell the code to
+do different things.  We start with a description of routines used to
+start a new calculation from scratch. Note that this covers the case
+of using the output of a single-star run as an initial condition for a
+binary run.  We discuss in Sec.~\ref{in:re} how to pick up a run exactly where
+it left off.
+
+First, and most importantly, you must decide how many stars you want
+in the calculation.  We have routines that can set up a single star,
+or two stars in an irrotational binary, a corotating binary, or a
+hyperbolic orbit.  Once you know what you want, you can edit the
+``{\tt sph.init}'' and ``{\tt sph.input}'' files accordingly, or
+better yet, run the ``{\tt testinput}'' utility we have written.  This
+program queries the user about all the option which go into the input
+files, creating all that need to be created.
+
+Some input routines require other files as well, and we discuss this
+below.  For more on file I/O, please see Sec.~\ref{io}.
+
+It is not difficult to write your own initialization subroutine, and
+we encourage you to do so if ours do not meet your needs.  You have
+complete freedom to do so, but be aware you will need to include ALL
+of the following things:
+
+\begin{itemize}
+\item Read in the run parameters from {\tt sph.input}, as well as any
+other input files you need.
+\item Set the positions, velocities, smoothing lengths, masses, and
+entropic variables of all the particles, these are the common block
+variables {\tt X, Y, Z, VX, VY, VZ, AM, HP, A}.
+\item Set the number of particles {\tt N} to the correct value, since
+it is needed for the next step.
+\item Call the subroutine {\tt GRAVQUANT}, which sets the proper
+limits for parallel computation
+\item Call the subroutine {\tt LFSTART}, which initializes the
+leapfrog algorithm (see Sec.~\ref{nm:sph:ev}).
+\end{itemize}
+
+\subsection{Automatically Generated Input Files: testinput}
+\label{in:test}
+
+To ease the process of starting a run, we have created a routine
+called {\tt testinput} which automatically generates all the input
+files you will need for a run, based on your answers to a succession of
+simple, straightforward questions. 
+We recommend you try it out a few times before trying to do all of
+the work yourself. 
+
+\subsection{Single Stars}
+\label{in:1s}
+In theory, there are an infinite number of ways to set up a star in
+SPH.  We offer built in routines to cover two important cases.  First,
+a run where all SPH particles are given the same mass.  In order to do
+this, we need to use a variable interparticle spacing to get the
+correct density profile. Alternately, we can use evenly-spaced
+particles of varying mass to reproduce a given density profile.  It is
+easiest to do this by setting up a cubic lattice, but unfortunately,
+such configurations are unstable against deformations, and thus take a
+longer time to relax. Instead, we use a hexagonal close-packed
+lattice, the configuration found, among other places, in the carbon
+atoms in a diamond, since these lattices are absolutely stable.
+
+For all single star models, we recommend you relax your configuration
+long enough for all the vibration in the lattice to damp away
+significantly.  Typically, the stellar model you compute will end up
+slightly smaller than the radius you requested.  This is to be
+expected, since the extent of the density distribution extends two
+smoothing lengths beyond the edge of the particles.  As a rule of
+thumb, don't worry too much abut small deviations from what you expect
+in the very outer edges of a star, since SPH cannot interpolate the
+density profile at an edge exactly (although it still does a better
+job than grid based codes).
+
+\subsubsection{Equal-mass Particles}
+\label{in:1s:em}
+To construct a single star with equal-mass particles, you can use the
+``{\tt setup1em}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt 1em}''.  
+
+This routine first constructs a polytropic fit to the density profile
+of the star, with the following parameters supplied in {\tt
+sph.input}: Stellar mass ``{\tt AMNS}'', stellar radius ``{\tt RNS}'',
+and adiabatic index $\Gamma=$``{\tt GAM}''.
+It then will lay down the exact number of particles you set by the
+parameter ``{\tt N}'' in {\tt sph.input}, by means of a Monte Carlo
+technique, weighted by the radial density profile.  Since this routine
+is extremely fast, and need never be repeated during a run, we have
+not used any Monte Carlo tricks to decrease the rejection rate (if you
+don't know what this means, it will not hurt you).  Typically, the
+configurations which result will be rather unrelaxed, with non-trivial
+density perturbations.  To relax the model, we recommend setting
+``{\tt NRELAX}''=1 and ``{\tt TRELAX}''$\approx\sqrt{{\tt
+RNS}^3/{\tt AMNS}}$ in {\tt sph.input}, with the time until relaxation
+finishes, ``{\tt TRELOFF}'', set to a much larger value.
+
+\subsubsection{Equally-spaced Particles}
+\label{in:1s:es}
+To construct a single star with equally-spaced particles, you can use the
+``{\tt setup1es}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt 1es}''.  
+
+This routine first constructs a polytropic fit to the density profile
+of the star, with the following parameters supplied in {\tt
+sph.input}: Stellar mass ``{\tt AMNS}'', stellar radius ``{\tt RNS}'',
+and adiabatic index $\Gamma=$``{\tt GAM}''.
+It then will lay down a number of particles similar to the number you
+set by the 
+parameter ``{\tt N}'' in {\tt sph.input}, in a hexagonal-close packed
+lattice.  Since it is only feasible to estimate the proper lattice
+spacing, we have set the code to create a number of particles slightly
+smaller than the requested number, to ensure no memory overflows will occur.
+Typically, the
+configurations which result will be somewhat unrelaxed, with small
+density perturbations.  To relax the model, we recommend setting
+``{\tt NRELAX}''=1 and ``{\tt TRELAX}''$\approx\sqrt{{\tt
+RNS}^3/{\tt AMNS}}$ in {\tt sph.input}, with the time until relaxation
+finishes, ``{\tt TRELOFF}'', set to a much larger value.
+
+\subsection{Corotating Binaries}
+\label{in:2c}
+Since we can relax corotating binary configurations, it is not
+necessary to compute a relaxed single star model first.  In some
+cases, however, such as a system near the point of Roche lobe
+overflow, it is not always a bad idea.  To allow for maximum
+flexibility, we have built-in routines which create binary systems
+from scratch with initially equally spaced particles in each star of
+variable mass, from scratch with equal-mass particles in each star
+laid down Monte Carlo style, and from previously calculated single
+star models.  In all cases, please consult the notes on single-star
+configurations for more information on these techniques.
+
+The initial binary separation is set by the user through the parameter
+``{\tt SEP0}''.  It is possible during relaxation to have the binary
+separation be a function of time, with best results found by keeping
+the distance fixed for some amount of time until a relaxed
+configuration is achieved, then scanning slowly inwards in a
+quasi-equilibrium way.  If you wish to employ a method like this,
+please look at the file named ``{\tt sepscan.f}'', set the parameters
+as you wish, and use it to replace the ``{\tt CMADJ}'' subroutine in
+{\tt advance.f}.
+
+In addition to equal mass binaries, i.e. those with mass ratio
+$q\equiv M_2/M_1=1.0$, the code can create from scratch unequal mass binaries
+with $q<1.0$.  For such systems, the user is free to set the mass
+ratio of the system using the parameter ``{\tt QDAR}''.  The code will
+calculate the radius of the secondary star assuming the same equation
+of state (pressure-density relation) holds exactly for both stars.
+The power-law mass-radius relation is given by
+\begin{equation}
+\frac{R_2}{R_1}=\left(\frac{M_2}{M_1}\right)^{\frac{\Gamma-2}{3\Gamma-4}}=
+q^{\frac{\Gamma-2}{3\Gamma-4}}. 
+\end{equation}
+It is no problem for the code to calculate binary configurations which
+have the same adiabatic index $\Gamma$, but different values for the
+entropic variable $A_i$, but you will need to create each star in turn as
+a single star model, and run the routine ``{\tt setup2qr}'', which
+creates a binary from previous models.
+
+\subsubsection{Mass Ratio q=1.0: Equal-mass Particles}
+\label{in:2c:em}
+To construct a $q=1.0$ corotating binary configuration with equal-mass
+particles in both stars, you can use the
+``{\tt setup2cm}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt 2cm}''.  
+The code lays down each star in an analogous manner to the equal-mass
+single star routines, and the same instructions about the relaxation
+timescale and shutoff time apply.
+
+Note that the parameter ``{\tt N}'' used to initialize the run refers
+to the number of particles in EACH star, the total number of particles
+will be $2{\tt N}$.
+
+\subsubsection{Mass Ratio q=1.0: Equally-spaced Particles}
+\label{in:2c:es}
+To construct a $q=1.0$ corotating binary configuration with
+equally-spaced particles 
+in both stars, you can use the
+``{\tt setup2cs}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt 2cs}''.  
+The code lays down each star in an analogous manner to the equally-spaced
+single star routines, and the same instructions about the relaxation
+timescale and shutoff time apply.
+
+Note that the parameter ``{\tt N}'' used to initialize the run refers
+to the approximate number of particles in EACH star, the total number
+of particles will be approximately $2{\tt N}$.
+
+\subsubsection{Mass Ratio q=1.0: Previously Calculated Single Star Models}
+\label{in:2c:er}
+To construct a $q=1.0$ corotating binary configuration based on a
+previously computed single star model, you can use the
+``{\tt setup2cr}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt 2cr}''.
+
+The particle positions and other important parameters are read in from
+a file called ``{\tt pos.sph}'', which you will need to create.  We
+have supplied the code to make an executable called ``{\tt b2pos}'',
+which will write this file for you.  Based on responses to two
+questions, it can convert binary output files, in the form ``{\tt
+out012.sph}'' (or any other 3-digit number) or ``{\tt restart.sph}'' 
+into the ASCII {\tt pos.sph} file.  For more on file I/O, please see
+Sec.~\ref{io}.  
+
+Note that the parameter ``{\tt N}'' used to initialize the run is
+essentially ignored, since the number of particles is set by the
+configuration read in from the files.
+
+\subsubsection{Mass Ratio q\textless 1.0: Equal-mass Particles}
+\label{in:2q:em}
+To construct a corotating binary configuration for stars of unequal
+mass, but with equal-mass SPH particles
+in both stars, you can use the
+``{\tt setup2qm}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt 2qm}''.  
+The code lays down each star in an analogous manner to the equal-mass
+single star routines, and the same instructions about the relaxation
+timescale and shutoff time apply.  The mass ratio is determined by the
+parameter ${\tt QDAR}=M_2/M_1$.
+
+Note that the parameter ``{\tt N}'' used to initialize the run refers
+to the number of particles in the primary star, which we
+typically assume to be the larger star, although no attempt is made to
+enforce this in the code. The number of particles in the secondary is
+given by ${\tt N}_2={\rm INT}({\tt QDAR}\times{\tt N})$.
+As always make sure the parameter ``{\tt
+NMAX}'' in the {\tt spha.h} header file is as large or larger than the
+total number of particles needed!
+
+\subsubsection{Mass Ratio q\textless 1.0: Equally-spaced Particles}
+\label{in:2q:es}
+To construct a corotating binary configuration for stars of unequal
+mass, but with equally-spaced SPH particles
+in both stars, you can use the
+``{\tt setup2qs}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt 2qs}''.  
+The code lays down each star in an analogous manner to the equally-spaced
+single star routines, and the same instructions about the relaxation
+timescale and shutoff time apply.  The mass ratio is determined by the
+parameter ${\tt QDAR}=M_2/M_1$.
+
+Note that the parameter ``{\tt N}'' used to initialize the run refers
+to the approximate number of particles in the primary star, which we
+typically assume to be the larger star, although no attempt is made to
+enforce this in the code. The number of particles in the secondary is
+given approximately by the ratio of the volumes of the two stars, since
+the code currently using the same grid spacing for BOTH stars.
+As always make sure the parameter ``{\tt
+NMAX}'' in the {\tt spha.h} header file is as large or larger than the
+total number of particles needed!
+There is nothing stopping you from changing the grid spacing of the
+second star, should you wish, and we are unaware of any negative
+effects this could cause.
+
+\subsubsection{Mass Ratio q\textless 1.0: Previously Calculated Single Star Models}
+\label{in:2q:er}
+To construct a corotating binary configuration for stars of unequal
+mass based on 
+previously computed single star models, you can use the
+``{\tt setup2qr}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt 2qr}''.
+
+For such configurations, you will need to construct models of 
+both stars separately.  Note that we do not require the stars to have
+different masses, it is fine to run different models for stars with
+the same mass.  It is also acceptable to use stars with different
+values of the entropic variable $A_i$, and this is actually required if you
+want to deviate from the polytropic mass-radius relation.  It is
+REQUIRED, however, that the stars have the same value of the
+adiabatic index $\Gamma$, since this is treated by the code as a
+single scalar defined for all of the particles.  For stars with
+different values of $\Gamma$, you will need to make it a vector within
+the common blocks, and carefully edit every occurrence of it in the
+code to reflect the change.
+
+The particle positions and other important parameters are read in from
+files called ``{\tt pos.sph}'' and ``{\tt pos2.sph}'', 
+which you will need to create.  We
+have supplied the code to make executables called ``{\tt b2pos}'' and
+``{\tt b2pos2}'',
+which will write these files for you.  Based on responses to two
+questions, they will convert binary output files, in the form ``{\tt
+out012.sph}'' (or any other 3-digit number) or ``{\tt restart.sph}'' 
+into the ASCII {\tt pos.sph} and {\tt pos2.sph} files, respectively.
+In fact, they only differ in the name of the file to which they write
+their data.  For more on file I/O, please see Sec.~\ref{io}.  
+
+\subsection{Irrotational Binaries}
+\label{in:2i}
+For irrotational NS, i.e. those with no net vorticity in the inertial
+frame, there is no simple way to relax the matter
+configuration. Instead, we highly recommend that you first compute
+relaxed single-star models, and then place them in a binary.  We allow
+you to deform the spherical stars into triaxial ellipsoids, by
+specifying the semi-major axes in each of the three principal
+directions.  Values for these axis lengths can be found for a number
+of different EOS in series of papers by \citet{LRS1,LRS2,LRS4,LRS3,LRS5} 
+and a paper by \citet{LomRS2}.  
+We recommend perusing them thoroughly before continuing
+onward.  Please note that by our
+definition, ``irrotational'' does not necessarily
+mean that every point on the
+star has the same velocity in the inertial frame.  Rather, it refers
+only to a lack of vorticity.  From \citet{LomRS2}, we determine that for a
+triaxial ellipsoidal star whose center of mass is
+at some distance $x_0$ from the origin, traveling initially in
+the y-direction with orbital velocity $\Omega x_0$, 
+and with semi-major axes $a_1$ and $a_2$ in the x- and
+y-directions, a particle located at coordinates $(x,y)$ with
+respect to the center of mass of the star has a velocity in the
+inertial frame given by
+\begin{eqnarray}
+v_x&=&\frac{2a_1^2}{a_1^2+a_2^2}\Omega y-\Omega y=
+\frac{a_1^2-a_2^2}{a_1^2+a_2^2}\Omega y,\nonumber\\
+v_y&=&-\frac{2a_2^2}{a_1^2+a_2^2}\Omega x+\Omega(x_0+x)=
+\frac{a_2^2-a_1^2}{a_1^2+a_2^2}\Omega x+\Omega x_0.
+\end{eqnarray}
+We note that for circular stars, this reduces to simple translationary
+motion.  For elliptical stars, the surface shape rotates with the
+orbital velocity in such a way that the surface profile is invariant
+in the corotating frame. Since the code cannot perform a relaxation
+loop to solve for $\Omega$, we estimate the 
+proper binary angular velocity by calculating the net inward force on
+both components of the binary, analogously to the corotating case.  
+
+As in the case of corotating systems, the initial binary separation is
+set with the parameter {\tt SEP0}, and the mass ratio is given by {\tt
+QDAR}.
+
+\subsubsection{Equal-mass Binaries}\label{in:2i:1}
+To construct a $q=1.0$ irrotational binary configuration,
+you can use the
+``{\tt setup2i1}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt 2i1}''.
+
+The particle positions and other important parameters are read in from
+a file called ``{\tt pos.sph}'', which you will need to create.  We
+have supplied the code to make an executable called ``{\tt b2pos}'',
+which will write this file for you.  Based on responses to two
+questions, it can convert binary output files, in the form ``{\tt
+out012.sph}'' (or any other 3-digit number) or ``{\tt restart.sph}'' 
+into the ASCII {\tt pos.sph} file.  For more on file I/O, please see
+Sec.~\ref{io}.  
+
+Note that the parameter ``{\tt N}'' used to initialize the run is
+essentially ignored, since the number of particles is set by the
+configuration read in from the files.
+
+Additionally, the run will need you to create an input file called
+``{\tt axes1.sph}''.  This file, in ASCII format, consists of three
+numbers representing the amount by which the spherical model is
+deformed in each of the three principal axes (x: the center of mass
+separation vector, y: the orbital velocity, z: the angular momentum axis).
+Typically, all three values should be $\sim 1$, and more often than
+not, $a_1>a_2>a_3$.  This file will be created for you by the {\tt
+testinput} executable discussed above.
+
+\subsubsection{Unequal-mass Binaries}\label{in:2i:q}
+To construct a irrotational binary configuration with unequal-mass stars,
+you can use the
+``{\tt setup2iq}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt 2iq}''.
+
+The particle positions and other important parameters are read in from
+files called ``{\tt pos.sph}'' and ``{\tt pos2.sph}'', 
+which you will need to create.  We
+have supplied the code to make executables called ``{\tt b2pos}'' and
+``{b2pos2}'',
+which will write these files for you.  Based on responses to two
+questions, it can convert binary output files, in the form ``{\tt
+out012.sph}'' (or any other 3-digit number) or ``{\tt restart.sph}'' 
+into the ASCII {\tt pos.sph} and {\tt pos2.sph} files.  
+For more on file I/O, please see Sec.~\ref{io}.  
+
+Note that the parameter ``{\tt N}'' used to initialize the run is
+essentially ignored, since the number of particles is set by the
+configuration read in from the files.
+
+Additionally, the run will need you to create input files called
+``{\tt axes1.sph}'' and ``{\tt axes2.sph}''.  These files, in ASCII
+format, each consist of three
+numbers representing the amount by which the spherical model is
+deformed in each of the three principal axes (x: the center of mass
+separation vector, y: the orbital velocity, z: the angular momentum
+axis) for the first and second star.
+Typically, all three values should be $\sim 1$, and more often than
+not, $a_1>a_2>a_3$.  The axis ratios should differ between the two
+stars, especially when the mass ratio diverges from unity.
+These files will be created for you by the {\tt
+testinput} executable discussed above.
+
+\subsection{Hyperbolic Collisions}
+\label{in:hy}
+In addition to circular binaries, we have written routines which set
+up two stars on a hyperbolic trajectory.  As was the case with
+irrotational binaries, there is no way to perform relaxation, so you
+will need to create relaxed single-star models first.  If the binaries
+is started from a sufficiently large separation, tidal deformations
+are expected to be small, and spherical initial conditions are
+perfectly acceptable.
+
+For stars with mass $M_1$ and $M_2$, we define the total and reduced
+masses by $M_T\equiv M_1+M_2$ and $\mu=M_1M_2/M_T$.  For a system with
+fixed masses, there are two free parameters which describe the initial
+orbit.  We choose to define out initial conditions via the periastron
+distance $r_p$ and relative velocity at infinity  $v_{\infty}\equiv
+|\vec{v}_1-\vec{v}_2|$, 
+set by the parameters
+``{\tt RP}'' and ``{\tt VPEAK}'', respectively.  The initial binary
+separation $r_0$ is given as usual by {\tt SEP0}, and determines where on
+the orbital path we start the calculation.
+For such a system, we know the conserved total energy must be
+\begin{equation}
+E_T=\frac{1}{2}\mu v_{\infty}^2,
+\end{equation}
+and by energy conservation the initial relative velocity is
+\begin{equation}
+v_0=\sqrt{v_{\infty}^2+\frac{2GM_T}{r_0}},
+\end{equation}
+and the velocity at periastron is
+\begin{equation}
+v_p=\sqrt{v_{\infty}^2+\frac{2GM_T}{r_p}}.
+\end{equation}
+From the latter expression, we find that the conserved system angular momentum
+is given by
+\begin{equation}
+J_T=\mu v_p r_p=\mu \sqrt{r_p^2 v_{\infty}^2+2GM_T r_p},
+\end{equation}
+which yields immediately the impact parameter $b$
+\begin{equation}
+b=\frac{J_T}{\mu v_{\infty}}=\sqrt{r_p^2+\frac{2GM_T r_p}{v_{\infty}^2}}.
+\end{equation}
+At our initial separation $r_0$, we know that the transverse velocity
+is given by
+\begin{equation}
+v_t=\frac{J_T}{\mu r_0}=\frac{\sqrt{r_p^2 v_{\infty}^2+2GM_T
+r_p}}{r_0}=\frac{v_{\infty}b}{r_0},
+\end{equation}
+and the radial velocity by $v_r=\sqrt{v_0^2-v_t^2}$.
+
+In order to use the most precise gravity grid possible, i.e., one that
+covers the smallest physical volume possible, we start both stars in
+opposite corners of the grid, rather than separated along the x-axis.
+The transverse velocity is projected perpendicular to the separation
+vector in such a way that $v_x=v_y$.  Technically, it is possible to
+have an initial velocity which could take the stars off the gravity
+cubic gravity grid, but only if $v_t/v_0>\sqrt{1/3}$.  If you find
+this is the case, you may want to start the stars further apart!
+
+Please note that the gravitational force calculated for particles can
+have a weak dependence on the physical size represented by a grid
+cell.  Since the grid will need to be large in these calculations, you
+may want to make it larger than normal when constructing single star models.
+
+\subsubsection{Equal-mass Hyperbolic Binaries}
+\label{in:hy:1}
+To construct a $q=1.0$ hyperbolic binary configuration,
+you can use the
+``{\tt setuphyp1}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt hy1}''.
+
+The particle positions and other important parameters are read in from
+a file called ``{\tt pos.sph}'', which you will need to create.  We
+have supplied the code to make an executable called ``{\tt b2pos}'',
+which will write this file for you.  Based on responses to two
+questions, it can convert binary output files, in the form ``{\tt
+out012.sph}'' (or any other 3-digit number) or ``{\tt restart.sph}'' 
+into the ASCII {\tt pos.sph} file.  For more on file I/O, please see
+Sec.~\ref{io}.  
+ 
+Given the possible complexities involved in setting the initial
+parameters, we strongly recommend using {\tt testinput} to help set
+the gravity grid limits.
+
+\subsubsection{Unequal-mass Hyperbolic Binaries}
+\label{in:hy:q}
+To construct a hyperbolic binary configuration with unequal-mass stars,
+you can use the
+``{\tt setuphypq}'' subroutine, which is called by setting the three
+letter code in {\tt sph.init} to ``{\tt hyq}''.
+
+The particle positions and other important parameters are read in from
+files called ``{\tt pos.sph}'' and ``{\tt pos2.sph}'', 
+which you will need to create.  We
+have supplied the code to make executables called ``{\tt b2pos}'' and
+``{b2pos2}'',
+which will write these files for you.  Based on responses to two
+questions, it can convert binary output files, in the form ``{\tt
+out012.sph}'' (or any other 3-digit number) or ``{\tt restart.sph}'' 
+into the ASCII {\tt pos.sph} and {\tt pos2.sph} files.  
+For more on file I/O, please see Sec.~\ref{io}.  
+
+Given the possible complexities involved in setting the initial
+parameters, we strongly recommend using {\tt testinput} to help set
+the gravity grid limits.
+
+\subsection{Restarting From a Previous Run}\label{in:re}
+If you are restarting directly from where a previous run stopped, the
+method is slightly different.  Note that these instructions do not
+apply for taking a single-star configuration and using it as the basis
+for the components of a binary, see the sections above for more on
+this.  To restart a run, take the required output file, in the form
+``{\tt restart.sph}'' or ``{\tt outxxx.sph}', where ``xxx'' is a
+3-digit integer, as described in Sec.~\ref{io:ou:du}, and rename the
+file ``{\tt restart.sph}''.  You will not need a file named ``{\tt
+sph.init}'', as it will be ignored by the program if {\tt restart.sph}
+is found.  You will need a new version of {\tt sph.input} as well.
+Most likely, you will want to adjust the parameter {\tt TF}, the time
+at which the run ends, to increase the value.  Other parameters can be
+changed, but be careful.  We recommend you use the {\tt testinput}
+routine the first time you try this to see how it works. 
+
+\newpage
+\section{File Input/Output}
+\label{io}
+As could be expected for a code of some complexity, there are several
+files required to start a run, and several files written during the
+run.  We summarize here the purpose and content of each.
+
+\subsection{Input Files}
+\label{io:in}
+Some input files are required for the code to work properly, some are
+optional.  Please check carefully to make sure you have all the files
+you need.
+
+\subsubsection{Key System Parameters: sph.input}\label{io:in:input}
+The file {\tt sph.input} is used to enter in most of the key run
+parameters into the code.  It is read in during all of the
+initialization subroutines, as well as when a run is being restarted.
+For your convenience, the {\tt testinput} utility can create this file
+for you, based on your responses to its questions.
+
+The {\tt sph.input} file is stored in ASCII format, such that it can
+be read into the program in the form of the ``{\tt INPUT}'' namelist,
+defined at the end {\tt spha.h}.  It includes the following variables:
+\begin{description}
+\item[TF:] The time at which the run will end, in code units.  New
+runs start from $t=0$, restarted runs start from the time reached when
+the {\tt restart.sph} file was written in the previous run.
+\item[DTOUT:] The time interval until a new permanent checkpointing
+file named {\tt outxxx.sph} is written (see Sec.~\ref{io:ou:du}),
+where ``xxx'' is a 3-digit integer set by the code parameter {\tt
+NOUT}.
+\item[GAM:] The adiabatic index $\Gamma$, used in the equation of
+state $P_i=A_i\rho_i^{\Gamma}$.
+\item[N:] Typically the number of particles to be used per star during
+the run, but the usage varies depending on which subroutine is
+called.  This parameter is basically ignored if you are restarting a
+run.  See the initialization subroutines for more on the meaning of
+this parameter for a given run.
+\item[NNOPT:] The optimal number of neighbors for each particle, which
+should generally be a factor of two less than the maximum allowed
+number, set by the parameter {\tt NNMAX} in {\tt spha.h}.  We have
+found good results for {\tt NNOPT}$=100$ for $N=10^5$ particles,
+letting the optimal number of neighbors increase or decrease by a
+factor of two for each order of magnitude change in the number of
+particles used.  See Sec.~\ref{nm:nl} for more info.
+\item[NAV:] Integer parameter used to set the choice of AV routine, or
+lack thereof.  See Sec.~\ref{nm:av} for more info.
+\item[ALPHA,BETA,ETA2:] Parameters used by the AV schemes.  Proper
+choices for each are discussed in Sec.~\ref{nm:av}.  These can all be set
+to zero if AV is off.
+\item[NGR:] Sets the gravity grid boundaries to be used by the run,
+see Sec.~\ref{nm:gr:bi} for the complete list.
+\item[XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,ZGRMAX:] Usually, these are the
+minimum and maximum x, y, and z-values used for the gravity grid, but
+usage varies depending on the choice of {\tt NGR}.
+\item[XGRLIM,YGRLIM,ZGRLIM:] For some choices of {\tt NGR}, the extent
+to which the gravity grid is allowed to expand, but see Sec.~\ref{nm:gr:bi} for
+the exact usage.
+\item[HMIN,HMAX:] The minimum and maximum allowed smoothing lengths
+for any particle.  If {\tt HMIN}$<0$, there is no minimum.  This is
+actually the implementation we usually prefer. 
+\item[NRELAX:] Sets the choice of the relaxation scheme being used.
+{\tt NRELAX}$=0$ means no relaxation, 1 means single-star relaxation,
+and 2 is used for corotating binaries.  See Sec.~\ref{nm:re} for more
+info.
+\item[TRELAX:] The relaxation timescale used in Eqs.~\ref{eq:relax1} and 
+\ref{eq:relax2}.
+\item[SEP0:] The initial binary separation for corotating and
+irrotational binaries, as well as for binaries on hyperbolic orbits.
+\item[QDAR:] The binary mass ratio, $q=M_2/M_1$, typically defined
+such that $q<1.0$.
+\item[AMNS,RNS:] Generally, the mass and radius of a single star or
+the primary in the binary, in code units.
+\item[RP,VPEAK:] The perihelion separation and relative velocity at
+infinite separation for binaries on hyperbolic orbits.  See
+Sec.~\ref{in:hy} for more info.
+\item[TRELOFF:] The time at which relaxation turns off, for runs which
+go into a dynamical phase after a relaxation phase.  For runs where
+relaxation should last for the entire run, set {\tt TRELOFF}\textgreater
+{\tt TF}.
+\item[NGRAVRAD:] Integer parameter, used to determine if radiation
+reaction, as defined by the BDS formalism, will be included ({\tt
+NGRAVRAD}=1) or not.  See Sec.~\ref{nm:rr} for more info.
+\item[SOL:] For runs with radiation reaction in use, the speed of
+light in code units, not necessarily equal to unity.
+\end{description}
+
+\subsubsection{Starting New Runs: sph.init}
+\label{io:in:init}
+The file {\tt sph.init} is used to choose which initialization
+subroutine will be used for new runs.  It is necessary unless a
+restart file named ``{\tt restart.sph}'' is present, in which case it
+will be ignored.
+For your convenience, the {\tt testinput} utility can create this file
+for you, based on your responses to its questions.
+The file format is defined by the {\tt INITT} namelist in {\tt
+init.f}, and the file has the form
+
+\noindent{\tt  \&INITT \\
+INAME=\'{}2qs\'{} \\
+\&END}
+
+where the complete list of options works as follows:
+\begin{itemize}
+\item {\tt 1em}: Single Star, equal-mass particles- subroutine {\tt SETUP1EM}
+\item {\tt 1es}: Single Star, equal-mass particles- subroutine {\tt SETUP1ES}
+\item {\tt 2cm}: Corotating binary, stars of equal mass, 
+equal-mass particles- subroutine {\tt SETUP2CM}
+\item {\tt 2cr}: Corotating binary, stars of equal mass, previously
+calculated stellar model- subroutine {\tt SETUP2CR}
+\item {\tt 2cs}: Corotating binary, stars of equal mass, 
+equally-spaced particles- subroutine {\tt SETUP2CS}
+\item {\tt 2i1}: Irrotational binary, stars of equal mass- 
+subroutine {\tt SETUP2I1}
+\item {\tt 2iq}: Irrotational binary, stars of unequal mass- 
+subroutine {\tt SETUP2IQ}
+\item {\tt 2qm}: Corotating binary, stars of unequal mass, 
+equal-mass particles- subroutine {\tt SETUP2QM}
+\item {\tt 2qr}: Corotating binary, stars of unequal mass, 
+previously calculated stellar models- subroutine {\tt SETUP2QR}
+\item {\tt 2qs}: Corotating binary, stars of unequal mass, 
+equally-spaced particles- subroutine {\tt SETUP2QS}
+\item {\tt hy1}: Binary on hyperbolic orbit, stars of equal mass- 
+subroutine {\tt SETUPHYP1}
+\item {\tt hyq}: Binary on hyperbolic orbit, stars of unequal mass- 
+subroutine {\tt SETUPHYPQ}
+\end{itemize}
+
+\subsubsection{Restarting From a Previous Run: restart.sph}
+A binary file named {\tt restart.sph} is used to restart a calculation
+by picking up where a previous run had left off.  Please note that
+using a previously calculated single star model as an initial model
+for a component of a binary DOES NOT count for this purpose.  
+
+There are two kinds of files which will work as a restart file.  First
+are the {\tt restart.sph} files created by the previous run.  These
+files, produced by the {\tt CHKPT} subroutine every {\tt NITCH}
+iterations, are constantly rewritten to save memory while remaining up
+to date.  More practical however, are the ``{\tt outxxx.sph}'' files,
+where ``xxx'' is a 3-digit integer, produced by the {\tt DUOUT}
+subroutine at code time intervals of {\tt DTOUT}, and when a run terminates.  
+To use these files, in the same exact format as the restart file
+above, simply rename the file ``{\tt restart.sph}''.
+
+\subsubsection{Using a Single-star Configuration in a Binary: pos.sph}
+Since relaxation is not an option for irrotational or hyperbolic
+binaries, we require the use of a relaxed single-star configuration.
+These are optional as inputs for corotating binaries as well.  These
+configurations are passed as ASCII files to the input routines from a
+file named {\tt pos.sph}, and from a file named {\tt pos2.sph} if the
+components of the binary are different.  To create these files, take
+a restart file of either form mentioned in the previous section, and
+run the utility ``{b2pos}'' on it, producing a file named ``{\tt
+pos.sph}'' (and ``{\tt b2pos2}'' if necessary,
+it is the same executable, but produces a file named ``{\tt pos2.sph}'').
+The first line of the file contains the parameters {\tt N, NNOPT,
+HMIN, HMAX, GAM}, and {\tt TRELAX} from the previous run.  Following
+that is a list, one line per particle, containing the position, mass,
+smoothing length, density, and entropic variable of each particle.  The
+file closes with the number of particles repeated, to be used as a
+safety check.
+
+\subsubsection{Defining Triaxial Ellipsoids for Irrotational Binaries: axes1.sph and axes2.sph}
+When constructing an irrotational binary, the code takes a spherical
+single-star model and deforms it into a triaxial ellipsoid.  To do so,
+the code reads from a file named {\tt axes1.sph} an ASCII list of
+three integers, representing the deformation in the three principal
+directions (it reads from {\tt axes2.sph} as well if you declare the
+binary contains stars of unequal-mass). This file will also be created
+by {\tt testinput} for your convenience.  See Sec.~\ref{in:2i} for
+more info.
+
+\subsection{Output Files}\label{io:ou}
+Our code pipes more than a bit of information to stdout.  It also can
+write several other files containing useful quantities.  To avoid
+trouble with MPI, only the lowest rank process opens and writes to
+these files.
+
+\subsubsection{restart.sph and outxxx.sph}
+\label{io:ou:du}
+We have two different routines which write a binary file containing
+all the information necessary to restart the run at a later time.
+Subroutine {\tt CHKPT} writes such a file every {\tt NITCH}
+iterations, where the parameter is set in the {\tt CHKPT} routine.  This
+file, whose format is given in the {\tt DUMP} subroutine, stores all
+the important scalar parameters for the run, and then stores all the
+particle-based quantities, except for the neighbor list information,
+which can be reconstructed from scratch during a new calculation. 
+The {\tt restart.sph} file is overwritten each time, to save on memory.
+
+The code is also set to checkpoint every time {\tt DTOUT} time units
+pass, writing a file named {\tt outxxx.sph}, where ``xxx'' is set as a 
+3-digit integer equal to {\tt NOUT}, which is iterated every time the
+file is written.  These files are useful for recording and
+reconstructing the progress of a run later.  
+
+\subsubsection{energy.sph, biout.sph, gwdata.sph, com.sph, and spin.sph}
+\label{io:ou:en}
+The code also writes to a number of ASCII output files every
+timestep.  
+
+The file {\tt energy.sph} lists the current time, and then the total
+system potential energy, kinetic energy, internal energy, total
+energy, total entropy, total angular momentum, and the maximum SPH
+density for any particle.  These quantities are defined by the sums:
+\begin{eqnarray}
+P.E.&=&0.5\sum_i m_i \Phi_i,\\
+K.E.&=&0.5 \sum_i m_i v_i^2,\\
+I.E.&=&\frac{1}{\Gamma-1}\sum_i A_i \rho_i^{\Gamma-1},\\
+E_T&=&P.E.+K.E.+I.E.,\\
+S_T&=&\frac{1}{\Gamma-1}\sum_i m_i
+\ln\left(\frac{A_i}{\Gamma-1}\right).
+\end{eqnarray}
+
+The file {\tt biout.sph} lists the current time, the binary
+separation, the angle between the x-axis and the line connecting the
+stars' centers-of-mass, the distances for each star between the star's
+center-of-mass and the furthest particle from it, and the angles for
+each star between the center-of-mass and the furthest particle.
+
+The file {\tt gwdata.sph} contains the current time, and then the
+second time derivatives of the quadrupole moments.  Note that we do
+not subtract out the trace of the quadrupole tensor beforehand.  To
+calculate the gravitational waveform, take the appropriate linear
+combination of these terms.  See \citet{FR1} for the way we have done
+this.
+We have generally found the first and last value for the quadrupole
+moments to be a bit inaccurate, especially if you wish to finite
+difference to find the gravitational wave luminosity,  Feel free to
+discard the first and last lines of each file.
+
+The file {\tt com.sph} stores the current time, and then the position
+and velocity of the centers-of-mass of each star.
+
+The file {\tt spin.sph} stores the current time, and then the angular
+momentum of each star around its own center of mass.  Note that we
+give the angular momentum in 5 directions, x, y, and z, as well as two
+directions rotated 45 degrees from the x and y directions in the x-y
+plane. These are appropriate to the case of hyperbolic binaries, for
+which the self-spin vectors lie primarily in the ``plus'' direction
+due to the way we construct the initial orbit.  See Sec.~\ref{in:hy}
+for more info about this.
+
+All of these files can be safely commented out or edited to meet your
+needs.  Note that they are opened upon the start of the code, and not
+closed until it terminates.  Thus, data is only written to them every
+time the buffer size exceeds a system-dependent value, and a run which
+is stopped midway through will not contain all of the calculated
+values.
+
+\subsubsection{Subroutine densplot}\label{io:ou:de}
+As an example of what can be done to output interesting information
+from the code, we include a routine named {\tt DENSPLOT} in {\tt
+densplot.f}.  It calculates the SPH density for a 3-d grid, whose size
+is set by parameters within the file.  The results are saved by
+converting the data to an integer between 0 and 255, and converting
+this to a character, which is stored in binary format, taking up one
+byte per element.  Results can be scaled against either the maximum
+density present on the grid, or a user-defined value.  Output files
+are saved in the format ``{\tt densxxxx.dat}'', where ``xxxx'' is a
+4-digit integer equal to the parameter {\tt NIT}, the iteration count. 
+
+\newpage
+\section{Common Block Variables and User-defined Parameters}
+\label{par}
+
+For your convenience, we list the variables contained within the
+common blocks, as well as the parameters set prior to runtime.
+
+\subsection{Common Block Parameters in spha.h}
+In the file {\tt spha.h}, you must define the following parameters
+prior to compiling the code:
+\begin{description}
+\item[NPROCS:] Set this equal to the number of processors on which you will
+tell the code to run.  It is often best of this number as a power of
+two, since it affects the FFT.
+\item[NMAX:] Set this number equal to or larger than the number of
+particles you will use.  It is used to allocate the sizes of the
+vectors defined for particle quantities.
+\item[NMAXP:]This is determined from the code by the equation {\tt
+NMAXP}=$({\tt NMAX}-1)$/${\tt NPROCS}+1$.  It represents the number of
+particles stored on each processor, and is used to set the size of the
+arrays containing the neighbor lists.
+\item[NNMAX:]This is the maximum allowed number of neighbors.  It is
+used to allocate the size of the neighbor arrays.  Make sure t is
+$\sim 2\times$ greater than the optimal number of neighbors in {\tt
+sph.input}.
+\item[NTAB:] This is the size of the vector which stores the tabulated
+values for the smoothing kernel function. 
+\item[CN:] We multiply the minimum timestep by this factor, to ensure
+the stability of the evolution.  We have found ${\tt CN}=0.6$ to be
+appropriate.  
+\item[PI:] This one is obvious!
+\item[NGRAV:] The size of the data portion of the gravity grid, in
+each dimension.
+\item[NNGRAV:] Defined as $2\times{\tt NGRAV}$, it is the actual size
+in each dimension of the gravity grid.
+\item[N1GRAV, NNP:] Defined as ${\tt NGRAV}+1$ and ${\tt NNGRAV}/{\tt
+NPROCS}$, respectively, these are needed as array sizes in the gravity
+routines.  
+\end{description}
+
+\subsection{Other Code Parameters}
+Other parameters are scattered around the code.  They are:
+\begin{description}
+\item[TINY, UTINY, RHOTINY:] These are used in subroutines {\tt TSTEP},
+{\tt ADVANCE}, and {\tt RHOS}, respectively, all of which are in {\tt
+advance.f} to avoid dividing by zero.
+\item[NGRIDX, XMIN, XMAX, NGRIDZ, ZMIN, ZMAX:] These are used in {\tt
+densplot.f} to define the memory size and physical size of the grid
+used for writing the density values.
+\item[MAXRHO:] This is the maximum density used to scale the density
+values in {\tt densplot.f}.
+\item[NAMX:] This is used by subroutines {\tt QGRAV}, {\tt QGRAV2}, and
+{\tt QGRAVRAD} to estimate the amount of mass contained within a given
+range of values for grid settings which only include a certain
+percentage of the mass.
+\item[TGR:] This is used by subroutines {\tt QGRAV}, {\tt QGRAV2}, and
+{\tt QGRAVRAD} when you choose {\tt NGR}=21.  After time {\tt TGR} has 
+passed, the run will switch from {\tt NGR}=2 to {\tt NGR}=1.  
+See Sec.~\ref{nm:gr:bi} for more info.
+\item[NCMX, NCMY, NCMZ:] These define the memory size of the grid used
+to calculate the neighbor lists in subroutine {\tt NENE} in {\tt
+nelist.f}.
+\item[NITCH:] This defines the number or iterations between writing
+data to the file {\tt restart.sph} in subroutine {\tt CHKPT} in {\tt
+output.f}.
+\item[TINY:] In subroutine {\tt ENOUT} in {\tt output.f}, this is used
+to avoid dividing by zero.
+\item[XMAX, MAXSTP, PI, NRM, NMAX:] These are used in {\tt poly.f} to define
+parameters for the Runge-Kutta routine which solves for the polytropic
+density profile.  Edit them at your own risk!
+\item[IA, IM, AM, IQ, IR, NTAB, NDIV, EPS, RNMX:] These are used in {\tt
+ran1.f} the random number generator.  Leave them alone.
+\item[MAXTRY, NRGRID:] These are used in the initialization routines to
+avoid infinite loops.  They should never affect the code at all.  If
+they come into play, there are bigger problems afoot.
+\end{description}
+
+\subsection{Common Block Variables}
+The remaining common block variables in {\tt spha.h}, to which almost all
+subroutines have access, are listed here:
+\begin{description}
+\item[NAV, ALPHA, BETA, ETA2:] These are all described in
+Sec.~\ref{io:in:input}, and set values for the AV routines.
+\item[NGR, XGRMIN, XGRMAX, YGRMIN, YGRMAX, ZGRMIN, ZGRMAX,]  
+{\bf XGRLIM, YGRLIM, ZGRLIM:} 
+These are all described in
+Sec.~\ref{io:in:input}, and set values for the gravity routines.
+\item[NRELAX, TRELAX, TRELOFF:] These are all described in
+Sec.~\ref{io:in:input}, and set values for the relaxation routines.
+\item[OMEGA2:] This is $\Omega^2$, the square of the orbital velocity.
+\item[NLEFT:] This is the number of particles in the primary.  Loops
+which distinguish between the stars in a binary loop from $1\le i \le
+{\tt NLEFT}$, and ${\tt NLEFT}+1\le i \le{\tt N}$.
+\item[SEP0, QDAR, AMNS, RNS, RP, VPEAK:] These are all described in
+Sec.~\ref{io:in:input}, and set parameters for the two stars.
+\item[N, NNOPT, GAM, HMIN, HMAX:] These are all described in
+Sec.~\ref{io:in:input}, and set some global parameters.
+\item[NOUT, NIT:] These are respectively, the current count of output
+files written by subroutine {\tt DUOUT}, and the number of iterations
+completed.  
+\item[DT, T:] These are the current timestep and the current time in
+code units.
+\item[VXS, VYS, VZS, XM2, YM2, ZM2:] These are the velocities and positions
+of each particle, corrected to subtract off shifts in the system
+center-of-mass and the leapfrog timestep, used in the output routines.
+\item[TF, DTOUT:] These are all described in
+Sec.~\ref{io:in:input}, representing the time at which the run ends,
+and the time interval between writing output files.
+\item[WTAB, DWTAB, CTAB:]The tabulated kernel function and its
+derivative, and a scalar representing the stepsize within the
+tabulated vector.
+\item[X, Y, Z, VX, VY, VZ, AM, HP, A, RHO, POR2, GRPOT:] Vectors containing, for
+each particle, the position, velocity, mass, smoothing length,
+entropic variable, density, the quantity $P/\rho^2$, and the
+gravitational potential.
+\item[VXDOT, VYDOT, VZDOT, ADOT:] The acceleration and rate of change of
+the entropic variable, for every particle.
+\item[GX, GY, GZ:] The gravitational force for every particle.
+\item[UX, UY, UZ:] Alternate velocity used when radiation reaction is
+included, see Sec.~\ref{nm:rr} and Eq.~\ref{eq:rr5} for more info.
+\item[XIJ, YIJ, ZIJ:] The vector difference in position between a
+particle and its neighbors, calculated once to save time, at the cost
+of memory usage.
+\item[NNI:] An array of each particle's neighbors.
+\item[NN:] A vector containing the number of neighbors each particle
+has.
+\item[MYRANK:] The rank of each processor, returned by
+MPI\_COMM\_RANK.
+\item[N\_LOWER, N\_UPPER:] The range of particles covered by each
+processor for parallel distributed computational loops.
+\item[KSTART, KOFFSET:] Parameters used to section the 3-d gravity
+grids for parallel FFTs.
+\item[Q3XX, Q3XY, Q3XZ, Q3YY, Q3YZ, Q3ZZ:]Third time-derivative of the
+quadrupole tensor, used for calculating radiation reaction.
+\item[Q2XX, Q2XY, Q2XZ, Q2YY, Q2YZ, Q2ZZ:]Second time-derivative of the
+quadrupole tensor, used for calculating gravitational waveforms.
+\item[NGRAVRAD, SOL:] Parameter used to determine whether radiation
+reaction will be used, and the speed of light in code units, 
+see Sec.~\ref{io:in:input}.
+\item[INITGR:] Integer used to delay turning on radiation reaction for
+two iterations when dynamical run starts, since initial values are
+often inaccurate.
+\item[FREACX, FREACY, FREACZ:] Radiation reaction force on each
+particle.
+\item[GXX, GXY, GXZ, GYY, GYZ, GZZ:] Second derivatives of the
+gravitational potential, used in calculating the radiation reaction
+force.
+\item[DXPNR, DYPNR, DZPNR:] Derivatives of one of the radiation reaction
+potentials.
+\end{description}
+
+\newpage
+\section{Subroutines}
+\label{su}
+For your convenience, we list the subroutines which comprise our code,
+with a brief description of each one.
+
+\begin{description}
+\item[Subroutine ADJUST:] Changes the smoothing length {\tt HP} of each
+particle to try to force 
+each particle to maintain {\tt NNOPT} neighbors, subject the rule
+${\tt HPMIN} \le {\tt HP} \le {\tt HPMAX}$.  In practice, we change the
+smoothing length of each particle to the arithmetic average of the old
+value, and the power-law guess at the new value, given by
+Eq.~\ref{eq:hpnew} as: 
+\begin{equation}
+h_{new}=\frac{1}{2}h_{old}\times\left
+[1+\left(\frac{N_{opt}}{N_N}\right)^{\frac{1}{3}}\right].
+\end{equation}
+\begin{itemize} 
+\item See Sec.~\ref{nm:nl} for more details.
+\item In file {\tt nelist.f}
+\item Calls no subroutines
+\item Called by subroutine {\tt MAINIT}
+\end{itemize}
+
+\item[Subroutine ADOTS:] Selects which AV routine to use to calculate
+the entropy evolution equation, Eq.~\ref{eq:adot}
+\begin{equation}
+\frac{dA_i}{dt}=\frac{\Gamma-1}{2\rho_i^{\Gamma-1}}\sum_j m_j \Pi_{ij}
+(\vec{v}_i-\vec{v}_j)\cdot \nabla W_{ij}.
+\end{equation}
+The choice of AV subroutine is set by the parameter {\tt
+NAV}.  Valid choices are:
+\begin{itemize}
+\item {\tt NAV}=0: No AV is used.
+\item {\tt NAV}=1: {\tt BALADOTS}: Balsara's form, see Sec.~\ref{nm:av:ba}
+\item {\tt NAV}=2: {\tt CLAADOTS}: Monaghan's form, see Sec.~\ref{nm:av:cl}
+\item {\tt NAV}=3: {\tt NEWADOTS}: Hernquist and Katz's form, see
+Sec.~\ref{nm:av:ne} 
+\end{itemize}
+Other choices of {\tt NAV} will produce an error.
+\begin{itemize} 
+\item See Sec.~\ref{nm:av} for more details.
+\item In file {\tt dots.f}
+\item Calls subroutines {\tt BALADOTS, CLAADOTS, NEWADOTS}
+\item Called by subroutine {\tt ADVANCE}
+\end{itemize}
+
+\item[Subroutine ADVANCE:] Evolves all the hydro quantities each timestep.
+First, the positions are advanced half a timestep, and used to calculate the
+rate of change of the entropic variable for each particle ({\tt ADOTS}), 
+before being advanced to the end 
+of the full timestep.  Next, velocities are advanced half a timestep, 
+accelerations are calculated ({\tt VDOTS}), 
+and then the velocities are advanced
+using the new acceleration a full timestep from their original values.
+\begin{itemize} 
+\item See Sec.~\ref{nm:sph:ev} for more details.
+\item In file {\tt advance.f}
+\item Calls subroutines {\tt NENE, RHOS, ADOTS, CMADJ, VDOTS}
+\item Called by subroutine {\tt MAINIT}
+\end{itemize}
+
+\item[Subroutine BALADOTS:] Calculates the change in the entropic 
+variable $A_i$ when the Balsara AV prescription is used \citep{balAV}.  
+See Eqs.~\ref{eq:adot}, \ref{eq:bal1}, \ref{eq:bal2}, and \ref{eq:bal3}.  
+See Sec.~\ref{nm:av:pa} for
+details about parallelization.
+\begin{itemize} 
+\item See Sec.~\ref{nm:av:ba} for more details.
+\item In file {\tt balAV.f}
+\item Calls subroutines {\tt CALCDIVV, GETCURLV}
+\item Called by subroutine {\tt ADOTS}
+\end{itemize}
+
+\item[Subroutine BALVDOTS:] Calculates the AV acceleration term 
+when the Balsara AV prescription is used \citep{balAV}.  
+See Eqs.~\ref{eq:vdot}, \ref{eq:bal1}, \ref{eq:bal2}, and \ref{eq:bal3}.  
+See Sec.~\ref{nm:av:pa} for
+details about parallelization.
+\begin{itemize} 
+\item See Sec.~\ref{nm:av:ba} for more details.
+\item In file {\tt balAV.f}
+\item Calls subroutines {\tt CALCDIVV, GETCURLV, DOQGRAV, QGRAV}
+\item Called by subroutine {\tt VDOTS}
+\end{itemize}
+
+\item[Subroutine BIOUT:] Writes file ``{\tt biout.sph}'' with 
+binary-related quantities
+\begin{itemize} 
+\item See Sec.~\ref{io:ou:en} for more details.
+\item In file {\tt output.f}
+\item Calls no subroutines 
+\item Called by subroutine {\tt OUTPUT}
+\end{itemize}
+
+\item[Subroutine CALCDIVV:] Calculates the SPH form of the divergence of the 
+velocity at each particle position. This is given by Eq.~\ref{eq:divv}
+as
+\begin{equation}
+(\vec{\nabla}\cdot \vec{v})_i={1 \over \rho_i}\sum_j m_j
+        (\vec{v}_j-\vec{v}_i)\cdot\vec{\nabla} W_{ij}.
+\end{equation}
+This routine is parallelized like other hydro loops, see Sec.~\ref{nm:sph:pa}.
+\begin{itemize} 
+\item See Sec.~\ref{nm:av:ne} for more details.
+\item In file {\tt calcdivv.f}
+\item Calls no subroutines
+\item Called by subroutines {\tt BALADOTS, BALVDOTS, NEWADOTS, NEWVDOTS}
+\end{itemize}
+
+\item[Subroutine CHECKPT:] Writes a binary file called ``{\tt restart.sph}''
+every {\tt NITCH} iterations. 
+\begin{itemize} 
+\item See Sec.~\ref{io:ou:du} for more details.
+\item In file {\tt output.f}
+\item Calls subroutine {\tt DUMP}
+\item Called by subroutine {\tt MAINIT}
+\end{itemize}
+
+\item[Subroutine CLAADOTS:] Calculates the change in the entropic variable
+$A_i$ when the Monaghan AV prescription is used \citep{claAV}.  
+See Eqs.~\ref{eq:adot}, \ref{eq:cla1}, \ref{eq:cla2}, and \ref{eq:cla3}.  
+See Sec.~\ref{nm:av:pa} for
+details about parallelization.
+\begin{itemize} 
+\item See Sec.~\ref{nm:av:cl} for more details.
+\item In file {\tt claAV.f}
+\item Calls no subroutines 
+\item Called by subroutine {\tt ADOTS}
+\end{itemize} 
+
+\item[Subroutine CLAVDOTS:] Calculates the AV acceleration term 
+when the Monaghan AV prescription is used \citep{claAV}.  
+See Eqs.~\ref{eq:vdot}, \ref{eq:cla1}, \ref{eq:cla2}, and \ref{eq:cla3}.  
+See Sec.~\ref{nm:av:pa} for
+details about parallelization.
+\begin{itemize} 
+\item See Sec.~\ref{nm:av:cl} for more details.
+\item In file {\tt claAV.f}
+\item Calls no subroutines 
+\item Called by subroutine {\tt VDOTS}
+\end{itemize} 
+
+\item[Subroutine CMADJ:] Adjusts the system center of mass back to the
+origin when relaxation is on.
+\begin{itemize} 
+\item See Sec.~\ref{nm:re} for more details.
+\item In file {\tt advance.f}
+\item Calls no subroutines 
+\item Called by subroutine {\tt ADVANCE}
+\end{itemize} 
+
+\item[Subroutine crfft:] This C-language routine performs a 3-d
+Real $\rightarrow$ Complex inverse transform using the FFTW libraries.
+\begin{itemize} 
+\item See Sec.~\ref{nm:gr:fftw} for more details.
+\item In file {\tt fftw\_f77.c}
+\item Calls the FFTW routines
+\item Called by subroutines {\tt QGRAV, QGRAV2, QGRAVRAD}
+\end{itemize} 
+
+\item[Subroutine DENSPLOT:] Generate a compact data file
+at every iteration for use in animations and other displays.  
+The SPH density is calculated on a grid, and stored in binary form
+as an integer in the range 0-255, converted to a character.
+\begin{itemize} 
+\item See Sec.~\ref{io:ou:de} for more details.
+\item In file {\tt densplot.f}
+\item Calls no subroutines 
+\item Called by subroutine {\tt OUTPUT}
+\end{itemize} 
+
+\item[Subroutine DOQGRAV:] Calculates the gravitational force 
+as well as the radiation reaction force on each particle, when radiation
+reaction is turned on by setting {\tt NGRAVRAD}=1.  
+Our scheme for radiation reaction is taken from
+\citet{BDS}.  See
+Eqs.~\ref{eq:rr1}, \ref{eq:rr2}, \ref{eq:rr3}, and \ref{eq:rr4}.
+Note that the speed of light {\tt SOL}, in code units, must be set for
+this routine to work.
+\begin{itemize} 
+\item See Sec.~\ref{nm:rr} for more details.
+\item In file {\tt doqgrav.f}
+\item Calls subroutines {\tt QGRAV2, QGRAVRAD} 
+\item Called by subroutines {\tt BALVDOTS, CLAVDOTS, NEWVDOTS}
+\end{itemize} 
+
+\item[Subroutine DUMP:] Writes to the logical unit passed an integer
+input variable (i.e., a previously opened file) the unformatted
+data which can be used to restart the run.  MAKE SURE THE FORMAT AGREES WITH
+SUBROUTINE INIT, OR YOU WILL NOT BE ABLE TO RESTART RUNS!
+\begin{itemize} 
+\item See Sec.~\ref{io:ou:du} for more details.
+\item In file {\tt output.f}
+\item Calls no subroutines
+\item Called by subroutines {\tt CHECKPT, DUOUT} 
+\end{itemize} 
+
+\item[Subroutine DUOUT:] Writes a binary file of the form
+``{\tt outxxx.sph}'', where ``xxx'' represents a three-digit integer,
+every time an additional time interval of ``{\tt DTOUT}'' passes.
+\begin{itemize} 
+\item See Sec.~\ref{io:ou:du} for more details.
+\item In file {\tt output.f}
+\item Calls subroutine {\tt DUMP}
+\item Called by subroutine {\tt OUTPUT}
+\end{itemize} 
+
+\item[Fuction DW:] Calculates the derivative of the SPH smoothing
+kernel function W, which itself is given by Eq.~\ref{eq:kern}.
+\begin{itemize} 
+\item See Sec.~\ref{nm:sph:rho} for more details.
+\item In file {\tt kernels.f}
+\item Calls no subroutines
+\item Called by subroutine {\tt TABULINIT}
+\end{itemize} 
+
+\item[Subroutine ENOUT:] Writes file ``{\tt energy.sph}'' with 
+various energies and other thermodynamic global quantities.
+\begin{itemize} 
+\item See Sec.~\ref{io:ou:en} for more details.
+\item In file {\tt output.f}
+\item Calls no subroutines 
+\item Called by subroutine {\tt OUTPUT}
+\end{itemize}
+
+\item[Subroutine GETCURLV:] Calculates the SPH form of the curl of the 
+velocity at each particle position. This is given by Eq.~\ref{eq:curlv}
+as
+\begin{equation}
+(\vec{\nabla}\times \vec{v})_i={1 \over \rho_i}\sum_j m_j
+        (\vec{v}_i-\vec{v}_j)\times\vec{\nabla} W_{ij}. 
+\end{equation}
+This routine is parallelized like other hydro loops, see Sec.~\ref{nm:sph:pa}.
+\begin{itemize} 
+\item See Sec.~\ref{nm:av:ba} for more details.
+\item In file {\tt getcurlv.f}
+\item Calls no subroutines
+\item Called by subroutines {\tt BALADOTS, BALVDOTS}
+\end{itemize}
+
+\item[Subroutine GRAVQUANT:] Calculates {\tt n\_lower} and {\tt n\_upper},
+which determine the range of particles whose neighbor lists are
+stored on a specific processor, since {\tt N}, the number of particles,
+is often set at runtime, and
+can differ from the user-specified value found in {\tt sph.input}.
+It also calculates the grid ranges used in the gravity routines, and
+runs consistency checks on several other numbers, to
+ensure the runs will not crash.  GRAVQUANT MUST BE CALLED AFTER N IS
+SET, AND BEFORE NENE IS RUN, OR THE CODE WILL CRASH AND DIE IN A 
+HORRIFIC FASHION!
+\begin{itemize} 
+\item See Sec.~\ref{nm:sph:pa} for more details.
+\item In file {\tt main.f}
+\item Calls no subroutines
+\item Called by subroutines {\tt INIT, SETUP1EM, SETUP1ES, SETUP2CM, 
+SETUP2CS, SETUP2CR, SETUP2I1, SETUP2IQ, SETUP2QM, SETUP2QS, SETUP2QR, 
+SETUPHYP1, SETUPHYPQ}
+\end{itemize}
+
+\item[Subroutine GWOUT:] Writes file ``{\tt gwdata.sph}'' with 
+gravity wave-related quantities
+\begin{itemize} 
+\item See Sec.~\ref{io:ou:en} for more details.
+\item In file {\tt output.f}
+\item Calls no subroutines 
+\item Called by subroutine {\tt OUTPUT}
+\end{itemize}
+
+\item[Subroutine INIT:] Initializes the run.  If a file named {\tt restart.sph}
+exists, it is used to continue a run which had been started previously.  
+If not, it reads in a 3-character code from {\tt sph.init} and launches the
+proper subroutine. See Sec.~\ref{io:in:init} for the complete list.
+
+After the chosen subroutine
+finishes, it runs the neighbor finding routine and writes out
+the parameters for the run.
+\begin{itemize} 
+\item See Sec.~\ref{in} for more details.
+\item In file {\tt main.f}
+\item Calls subroutines {\tt TABULINIT, GRAVQUANT, NENE,
+SETUP1EM, SETUP1ES, SETUP2CM, SETUP2CS, SETUP2CR, SETUP2I1,
+SETUP2IQ, SETUP2QM, SETUP2QS, SETUP2QR, SETUPHYP1, SETUPHYPQ}
+\item Called by program {\tt MAIN}
+\end{itemize}
+
+\item[Subroutine LFSTART:] initializes the leapfrog timing algorithm. 
+\begin{itemize} 
+\item See Sec.~\ref{nm:sph:ev} for more details.
+\item In file {\tt init.f}
+\item Calls subroutines {\tt GRAVQUANT, NENE, RHOS, VDOTS, TSTEP}
+\item Called by subroutines {\tt SETUP1EM, SETUP1ES, SETUP2CM, SETUP2CS,
+SETUP2CR, SETUP2I1, SETUP2IQ, SETUP2QM, SETUP2QS, SETUP2QR, SETUPHYP1, SETUPHYPQ}
+\end{itemize}
+
+\item[Program MAIN:] Initializes MPI, initializes the hydro
+routines, opens up the output files, launches the iteration loop,
+and at the end, closes all files and shuts down MPI.
+\begin{itemize} 
+\item In file {\tt main.f}
+\item Calls subroutines {\tt INIT, MAINIT}
+\end{itemize}
+
+\item[Subroutine MAINIT:] Runs a single iteration of the SPH code.
+\begin{itemize} 
+\item In file {\tt main.f}
+\item Calls subroutines {\tt TSTEP, ADVANCE, ADJUST, CHECKPT, OUTPUT}
+\item Called by program {\tt MAIN}
+\end{itemize}
+
+\item[Subroutine makeplans:] This C-language subroutine initializes
+the FFTW library FFT routines, and returns the memory addresses of
+structures containing plans for calculating the actual Fourier Transforms.
+\begin{itemize} 
+\item See Sec.~\ref{nm:gr:fftw} for more details.
+\item In file {\tt fftw\_f77.c}
+\item Calls the FFTW routines
+\item Called by subroutines {\tt QGRAV, QGRAV2, QGRAVRAD}
+\end{itemize} 
+
+\item[Subroutine NENE:] Computes the nearest-neighbor list for each
+particle, and saves  the information in an array which is distributed
+over the processors. 
+
+We compute the neighbor list using a head-of-cell/linked list method,
+which assigns all particles to a 3-d array, then loops over the
+neighboring cell to each particle to construct the neighbor list.  All
+neighbors must lie within two smoothing lengths of the particle.
+\begin{itemize} 
+\item See Sec.~\ref{nm:nl} for more details.
+\item In file {\tt nelist.f}
+\item Calls no subroutines
+\item Called by subroutines {\tt ADVANCE, INIT, LFSTART, OPTHP2, OPTHP3, 
+SETUP2I1, SETUP2IQ}
+\end{itemize}
+
+\item[Subroutine NEWADOTS:]Calculates the change in the entropic variable
+$A_i$ when the Hernquist and Katz AV prescription is used \citep{newAV}.  
+See Eqs.~\ref{eq:adot}, \ref{eq:new1}, and \ref{eq:new2}.
+See Sec.~\ref{nm:av:pa} for
+details about parallelization.
+\begin{itemize} 
+\item See Sec.~\ref{nm:av:ne} for more details.
+\item In file {\tt newAV.f}
+\item Calls subroutine {\tt CALCDIVV}
+\item Called by subroutine {\tt ADOTS}
+\end{itemize}
+  
+\item[Subroutine NEWVDOTS:] Calculates the AV acceleration term 
+when the Hernquist and Katz AV prescription is used \citep{newAV}.  
+See Eqs.~\ref{eq:vdot}, \ref{eq:new1}, and \ref{eq:new2}.
+See Sec.~\ref{nm:av:pa} for
+details about parallelization.
+\begin{itemize} 
+\item See Sec.~\ref{nm:av:ne} for more details.
+\item In file {\tt newAV.f}
+\item Calls subroutines {\tt CALCDIVV, DOQGRAV, QGRAV}
+\item Called by subroutine {\tt VDOTS}
+\end{itemize}
+
+\item[Subroutine OPTHP2:] Calculates the approximately optimal particle
+smoothing length for runs in which equal-mass particles are laid down
+Monte Carlo style.  The equation is given by
+\begin{equation}
+h_i=0.9 R\left(\frac{3}{32\pi}\frac{N_{opt} M}{N
+\rho_i}\right)^{\frac{1}{2}}. \label{eq:opthp2}
+\end{equation}
+where $M$ and $R$ are the star's mass and radius, $\rho_i$ is the
+ideal density at that particle's position, and $N$ and $N_{opt}$ are
+the total number of particles in the star and the optimal number of
+neighbors, respectively. 
+\begin{itemize} 
+\item See Sec.~\ref{nm:nl} for more details.
+\item In file {\tt setup1ns.f}
+\item Calls subroutines {\tt POLY, NENE, ADJUST}
+\item Called by subroutines {\tt SETUP1EM, SETUP2EM, SETUP2QM}
+\end{itemize}
+
+\item[Subroutine OPTHP3:]  Calculates the approximately optimal particle
+smoothing length for the secondary star for unequal-mass stars with
+equal-mass particles (subroutine {\tt SETUP2QM}), using
+Eq.~\ref{eq:opthp2}, with $R$ and $M$ appropriate for the secondary.
+\begin{itemize} 
+\item See Sec.~\ref{nm:nl} for more details.
+\item In file {\tt setup2q.f}
+\item Calls subroutines {\tt POLY, NENE, ADJUST}
+\item Called by subroutine {\tt SETUP2QM}
+\end{itemize}
+
+\item[Subroutine OUTPUT:] Calls out all the subroutines which write
+data to files, having first synchronized the velocities to the same
+time values as the positions according to the leapfrog algorithm (see
+Sec.~\ref{nm:sph:ev}).
+\begin{itemize} 
+\item See Sec.~\ref{io:ou:en} for more details.
+\item In file {\tt output.f}
+\item Calls subroutines {\tt ENOUT, BIOUT, GWOUT, DENSPLOT, DUOUT}
+\item Called by subroutine {\tt MAINIT}
+\end{itemize}
+
+\item[Subroutine POLY:] Calculates the value of the entropic variable $A_i$ 
+and the density profile for a spherical polytrope with specified index, 
+mass and radius.
+
+This is one of the very few subroutines which has values passed to it
+during the subroutine call.  They are, in order, the adiabatic index
+$n\equiv 1/(\Gamma-1)$, the stellar mass, the stellar radius, and the
+size of the vector containing the density profile. It returns the
+density profile as a vector, and the vale of the entropic variable for
+the star.  Note that this routine does NOT include the {\tt spha.h}
+header file, and thus has no access to common block variables.  
+Note also that it calls subroutines {\tt DERIVS, RKTAB, RK4}, which are the
+standard Numerical Recipes routine for doing a fourth order
+Runge-Kutta integration \citep{NR}.
+\begin{itemize} 
+\item In file {\tt poly.f}
+\item Calls Numerical Recipes subroutines
+\item Called by subroutines {\tt SETUP1EM, SETUP1ES, SETUP2CM,
+SETUP2CS, SETUP2QM, SETUP2QS} 
+\end{itemize}
+
+\item[Subroutine QGRAV:] Calculates the gravitational force on each
+particle by means of an FFT convolution algorithm.  We use the
+MPI-parallelized routines of the FFTW software package, available free
+at {\tt http://www.fftw.org}.
+ 
+The Green's function for the transform requires a grid twice as large
+as the grid which holds the data, a method known as zero-padding the data.
+Essentially, we need to handle independently the effect of particles located
+at both higher and lower x, y, and z, and one can check that the range of
+possible values of $\vec{r}_i-\vec{r}_j$ is twice as large in every direction as the
+data itself.
+
+Densities are uploaded to the grid by a cloud-in-cell algorithm, i.e. densities
+are assigned with weights to the 8 grid points around any particle.  We then
+calculate the FFT of the data, convolve with the $1/r$ Green's function, and
+inverse FFT.  As this is a parallel FFT, with 3-d arrays distributed along the
+z-direction, we need to take additional steps to finite difference in the
+z-direction when we are near the edge of each processor's data segment.
+\begin{itemize} 
+\item See Sec.~\ref{nm:gr} for more details.
+\item In file {\tt grav.f}
+\item Calls subroutines {\tt makeplans, rcfft, crfft}
+\item Called by subroutines {\tt BALVDOTS, CLAVDOTS, NEWVDOTS}
+\end{itemize}
+
+\item[Subroutine QGRAV2:] Calculates the gravitational force on each
+particle by means of an FFT convolution algorithm, as well as all
+second derivatives of the gravitational potential, which are needed
+for calculating the radiation reaction force.  Other than that, this
+routine is an exact replica of subroutine {\tt QGRAV}
+\begin{itemize} 
+\item See Secs.~\ref{nm:gr} and \ref{nm:rr} for more details.
+\item In file {\tt grav2.f}
+\item Calls subroutines {\tt makeplans, rcfft, crfft}
+\item Called by subroutine {\tt DOQGRAV}
+\end{itemize}
+
+\item[Subroutine QGRAVRAD:] Calculates the radiation reaction
+potential given by Eq.~\ref{eq:rr4}, in the notation of the BDS
+radiation reaction formalism \citep{BDS}.
+\begin{itemize} 
+\item See Sec.~\ref{nm:rr} for more details.
+\item In file {\tt gravrad.f}
+\item Calls subroutines {\tt makeplans, rcfft, crfft}
+\item Called by subroutine {\tt DOQGRAV}
+\end{itemize}
+
+\item[Function RAN1:] Random number generator, returning a value
+$0 < {\tt RAN1} < 1$.  Use IDUM=-2391 as a seed.  Note that the
+generator is fully deterministic, and thus your runs are repeatable.
+\begin{itemize} 
+\item In file {\tt ran1.f}
+\item Called by subroutines {\tt SETUP1EM, SETUP1ES, SETUP2CM,
+SETUP2CS, SETUP2QM, SETUP2QS} 
+\end{itemize}
+
+\item[Subroutine rcfft:] This C-language routine performs a 3-d
+Complex $\rightarrow$ Real forward transform using the FFTW libraries.
+\begin{itemize} 
+\item See Sec.~\ref{nm:gr:fftw} for more details.
+\item In file {\tt fftw\_f77.c}
+\item Calls the FFTW routines
+\item Called by subroutines {\tt QGRAV, QGRAV2, QGRAVRAD}
+\end{itemize} 
+
+\item[Subroutine RELAX:] Adds the relaxation drag terms to the
+equations of motion. For single stars, the drag force is given by 
+\begin{equation}
+\frac{d\vec{v}}{dt}=\vec{a}-\frac{\vec{v}}{t_{relax}},
+\end{equation}
+where the user sets $t_{relax}$.  For binary stars, the calculation is
+performed in the corotating frame, and the relaxation force takes the
+form
+\begin{equation}
+\frac{d\vec{v}}{dt}=\vec{a}+\Omega^2 \vec{r}-\frac{\vec{v}}{t_{relax}},
+\end{equation}
+where $\Omega$ is calculated from the inward force on each star.
+\begin{itemize} 
+\item See Sec.~\ref{nm:re} for more details.
+\item In file {\tt advance.f}
+\item Calls no subroutines
+\item Called by subroutine {\tt ADVANCE}
+\end{itemize}
+
+\item[Subroutine RHOS:] Calculates the SPH expression for the particle
+density, given by 
+\begin{equation}
+\rho_i=\sum_j m_j W_{ij},
+\end{equation}
+where the sum is taken over all the neighbors of a particle.
+We use a ``gather-scatter'' algorithm, i.e., for each
+particle-neighbor pair, we count half of the density contribution to
+the particle, and half to the neighbor.  
+This routine uses MPI to distribute the computation. 
+\begin{itemize} 
+\item See Sec.~\ref{nm:sph:rho} for more details.
+\item In file {\tt advance.f}
+\item Calls no subroutines
+\item Called by subroutines {\tt ADVANCE, LFSTART, SETUP2I1, SETUP2IQ}
+\end{itemize}
+
+\item[Subroutine SETUP1EM:] Constructs a single star with equal-mass
+particles, laid down Monte-Carlo style weighted by the density at a
+given radius according to a polytropic fit.  Called by using the
+3-letter code ``{\tt 1em}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:1s:em} for more details.
+\item In file {\tt setup1ns.f}
+\item Calls subroutines {\tt POLY, GRAVQUANT, LFSTART, OPTHP2}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine SETUP1ES:] Constructs a single star with equally-spaced
+particles of varying mass, which yield a density profile very near to
+a polytropic fit.  Called by using the
+3-letter code ``{\tt 1es}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:1s:es} for more details.
+\item In file {\tt setup1ns.f}
+\item Calls subroutines {\tt POLY, GRAVQUANT, LFSTART}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine SETUP2CM:] Constructs a corotating binary containing
+equal-mass stars, using equal-mass
+particles, laid down Monte-Carlo style weighted by the density at a
+given radius according to a polytropic fit.  Called by using the
+3-letter code ``{\tt 2cm}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:2c:em} for more details.
+\item In file {\tt setup2ns.f}
+\item Calls subroutines {\tt POLY, GRAVQUANT, LFSTART, OPTHP2}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine SETUP2CR:] Constructs a corotating binary containing
+equal-mass stars, using the output file from a single star run named
+``{\tt pos.sph}''.  Called by using the
+3-letter code ``{\tt 2cr}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:2c:er} for more details.
+\item In file {\tt setup2ns.f}
+\item Calls subroutines {\tt GRAVQUANT, LFSTART}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine SETUP2CS:] Constructs a corotating binary containing
+equal-mass stars, using equally-spaced
+particles of varying mass, which yield a density profile very near to
+a polytropic fit.  Called by using the
+3-letter code ``{\tt 2cs}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:2c:es} for more details.
+\item In file {\tt setup2ns.f}
+\item Calls subroutines {\tt POLY, GRAVQUANT, LFSTART}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine SETUP2I1:] Constructs an irrotational binary containing
+equal-mass stars, using the output file from a single star run named
+``{\tt pos.sph}'', and axis ratios specified by a field called ``{\tt
+axes1.sph}''.  Called by using the 
+3-letter code ``{\tt 2i1}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:2i:1} for more details.
+\item In file {\tt setupirr.f}
+\item Calls subroutines {\tt NENE, ADJUST, RHOS, VDOTS, GRAVQUANT, LFSTART}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine SETUP2IQ:] Constructs an irrotational binary containing
+unequal-mass stars, using the output filed from single star run named
+``{\tt pos.sph}'' and ``{\tt pos2.sph}'', 
+and axis ratios specified by a field called ``{\tt axes1.sph}'' and
+``{\tt axes2.sph}''.
+Called by using the 3-letter code ``{\tt 2iq}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:2i:q} for more details.
+\item In file {\tt setupirr.f}
+\item Calls subroutines {\tt NENE, ADJUST, RHOS, VDOTS, GRAVQUANT, LFSTART}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine SETUP2QM:] Constructs a corotating binary containing
+unequal-mass stars, using equal-mass
+particles, laid down Monte-Carlo style weighted by the density at a
+given radius according to a polytropic fit.  Called by using the
+3-letter code ``{\tt 2qm}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:2q:em} for more details.
+\item In file {\tt setup2q.f}
+\item Calls subroutines {\tt POLY, GRAVQUANT, LFSTART, OPTHP2, OPTHP3}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine SETUP2QR:] Constructs a corotating binary containing
+unequal-mass stars, using the output files from single star runs named
+``{\tt pos.sph}'' and ``{\tt pos2.sph}''.  Called by using the
+3-letter code ``{\tt 2qr}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:2q:er} for more details.
+\item In file {\tt setup2q.f}
+\item Calls subroutines {\tt GRAVQUANT, LFSTART}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine SETUP2QS:] Constructs a corotating binary containing
+unequal-mass stars, using equally-spaced
+particles of varying mass, which yield a density profile very near to
+a polytropic fit.  Called by using the
+3-letter code ``{\tt 2qs}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:2q:es} for more details.
+\item In file {\tt setup2q.f}
+\item Calls subroutines {\tt POLY, GRAVQUANT, LFSTART}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine SETUPHYP1:] Constructs a binary on a hyperbolic orbit
+containing equal-mass stars, using the output file from a single star run named
+``{\tt pos.sph}''.  Called by using the 
+3-letter code ``{\tt hy1}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:hy:1} for more details.
+\item In file {\tt setuphyper.f}
+\item Calls subroutine {\tt LFSTART}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+ 
+\item[Subroutine SETUPHYPQ:] Constructs a binary on a hyperbolic orbit
+containing unequal-mass stars, using the output files from 
+single star runs named
+``{\tt pos.sph}'' and ``{\tt pos2.sph}''.  Called by using the 
+3-letter code ``{\tt hyq}'' in {\tt sph.init}. 
+\begin{itemize} 
+\item See Sec.~\ref{in:hy:q} for more details.
+\item In file {\tt setuphyper.f}
+\item Calls subroutine {\tt LFSTART}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine TABULINIT:] calculates the SPH smoothing kernel W,
+used to calculate all hydrodynamic quantities, and its derivative.
+The kernel function we use is given by
+\begin{equation}
+W(r,h)={1\over\pi h^3}\cases{1-{3\over2}\left({r\over h}\right)^2
+      +{3\over4}\left({r\over h}\right)^3,& $0\le{r\over h}<1$,\cr
+ {1\over4}\left[2-\left({r\over h}\right)\right]^3,& $1\le{r\over
+ h}<2$,\cr
+      0,& ${r\over h}\ge2$.\cr}
+\end{equation}
+\begin{itemize} 
+\item See Sec.~\ref{nm:sph:rho} for more details.
+\item In file {\tt kernels.f}
+\item Calls functions {\tt W, DW}
+\item Called by subroutine {\tt INIT}
+\end{itemize}
+
+\item[Subroutine TSTEP:] Calculates the time step used in the code.
+\begin{itemize} 
+\item See Sec.~\ref{nm:sph:ev} for more details.
+\item In file {\tt advance.f}
+\item Calls no subroutines
+\item Called by subroutines {\tt MAINIT, LFSTART}
+\end{itemize}
+
+\item[Subroutine VDOTS:] Selects which AV routine to use to calculate
+the all forces on the particle, including the AV acceleration, 
+Eq.~\ref{eq:vdot}.  The choice of AV subroutine is set by the parameter {\tt
+NAV}.  Valid choices are:
+\begin{itemize}
+\item {\tt NAV}=0: {\tt BALVDOTS}, but no AV acceleration term is used.
+\item {\tt NAV}=1: {\tt BALVDOTS}: Balsara's form, see Sec.~\ref{nm:av:ba}
+\item {\tt NAV}=2: {\tt CLAVDOTS}: Monaghan's form, see Sec.~\ref{nm:av:cl}
+\item {\tt NAV}=3: {\tt NEWVDOTS}: Hernquist and Katz's form, see
+Sec.~\ref{nm:av:ne} 
+\end{itemize}
+Other choices of {\tt NAV} will produce an error.
+\begin{itemize} 
+\item See Sec.~\ref{nm:av} for more details.
+\item In file {\tt dots.f}
+\item Calls subroutines {\tt BALVDOTS, CLAVDOTS, NEWVDOTS}
+\item Called by subroutines {\tt ADVANCE,LFSTART, SETUP2I1, SETUP2IQ}
+\end{itemize}
+
+\item[Function W:] Calculates the SPH smoothing
+kernel function W, which is given by Eq.~\ref{eq:kern}.
+\begin{itemize} 
+\item See Sec.~\ref{nm:sph:rho} for more details.
+\item In file {\tt kernels.f}
+\item Calls no subroutines
+\item Called by subroutine {\tt TABULINIT}
+\end{itemize} 
+\end{description}
+
+\newpage
+\section{References to Cite and Legal Information}
+\label{legal}
+
+Anyone using this code should say something to the effect: ``This
+code was developed originally by Rasio and Shapiro to study merging binaries 
+\citep{RS1,RS2,RS3}, and parallelized by Faber and Rasio for use in
+post-Newtonian calculations of coalescing neutron stars
+\citep{FR1,FR2,FR3}.''  All six references should be considered
+mandatory.
+
+Mention should always be made of the FFTW, please see their webpage
+for proper citation forms, at {\tt http://www.fftw.org}.  
+A short list of references should include the following: \citet{fftw2,fftw1}.
+
+Those using our radiation reaction terms need to reference
+\citet{BDS}.  Those using artificial viscosity need to reference
+\citet{LSRS}, as well as whichever of \citet{claAV,newAV,balAV} is
+appropriate.
+
+Also, please mention the name of the website from which you got the
+code, so that others may find it more easily.  Thanks again.
+
+\subsection{Gnu General Public License}
+
+\begin{center}
+{\parindent 0in
+
+Version 2, June 1991
+
+Copyright \copyright\ 1989, 1991 Free Software Foundation, Inc.
+
+\bigskip
+
+59 Temple Place - Suite 330, Boston, MA  02111-1307, USA
+
+\bigskip
+
+Everyone is permitted to copy and distribute verbatim copies
+of this license document, but changing it is not allowed.
+}
+\end{center}
+
+\begin{center}
+{\bf\large Preamble}
+\end{center}
+
+
+The licenses for most software are designed to take away your freedom to
+share and change it.  By contrast, the GNU General Public License is
+intended to guarantee your freedom to share and change free software---to
+make sure the software is free for all its users.  This General Public
+License applies to most of the Free Software Foundation's software and to
+any other program whose authors commit to using it.  (Some other Free
+Software Foundation software is covered by the GNU Library General Public
+License instead.)  You can apply it to your programs, too.
+
+When we speak of free software, we are referring to freedom, not price.
+Our General Public Licenses are designed to make sure that you have the
+freedom to distribute copies of free software (and charge for this service
+if you wish), that you receive source code or can get it if you want it,
+that you can change the software or use pieces of it in new free programs;
+and that you know you can do these things.
+
+To protect your rights, we need to make restrictions that forbid anyone to
+deny you these rights or to ask you to surrender the rights.  These
+restrictions translate to certain responsibilities for you if you
+distribute copies of the software, or if you modify it.
+
+For example, if you distribute copies of such a program, whether gratis or
+for a fee, you must give the recipients all the rights that you have.  You
+must make sure that they, too, receive or can get the source code.  And
+you must show them these terms so they know their rights.
+
+We protect your rights with two steps: (1) copyright the software, and (2)
+offer you this license which gives you legal permission to copy,
+distribute and/or modify the software.
+
+Also, for each author's protection and ours, we want to make certain that
+everyone understands that there is no warranty for this free software.  If
+the software is modified by someone else and passed on, we want its
+recipients to know that what they have is not the original, so that any
+problems introduced by others will not reflect on the original authors'
+reputations.
+
+Finally, any free program is threatened constantly by software patents.
+We wish to avoid the danger that redistributors of a free program will
+individually obtain patent licenses, in effect making the program
+proprietary.  To prevent this, we have made it clear that any patent must
+be licensed for everyone's free use or not licensed at all.
+
+The precise terms and conditions for copying, distribution and
+modification follow.
+
+\begin{center}
+{\Large \sc Terms and Conditions For Copying, Distribution and
+  Modification}
+\end{center}
+
+
+%\renewcommand{\theenumi}{\alpha{enumi}}
+\begin{enumerate}
+
+\addtocounter{enumi}{-1}
+
+\item 
+
+This License applies to any program or other work which contains a notice
+placed by the copyright holder saying it may be distributed under the
+terms of this General Public License.  The ``Program'', below, refers to
+any such program or work, and a ``work based on the Program'' means either
+the Program or any derivative work under copyright law: that is to say, a
+work containing the Program or a portion of it, either verbatim or with
+modifications and/or translated into another language.  (Hereinafter,
+translation is included without limitation in the term ``modification''.)
+Each licensee is addressed as ``you''.
+
+Activities other than copying, distribution and modification are not
+covered by this License; they are outside its scope.  The act of
+running the Program is not restricted, and the output from the Program
+is covered only if its contents constitute a work based on the
+Program (independent of having been made by running the Program).
+Whether that is true depends on what the Program does.
+
+\item You may copy and distribute verbatim copies of the Program's source
+  code as you receive it, in any medium, provided that you conspicuously
+  and appropriately publish on each copy an appropriate copyright notice
+  and disclaimer of warranty; keep intact all the notices that refer to
+  this License and to the absence of any warranty; and give any other
+  recipients of the Program a copy of this License along with the Program.
+
+You may charge a fee for the physical act of transferring a copy, and you
+may at your option offer warranty protection in exchange for a fee.
+
+\item
+
+You may modify your copy or copies of the Program or any portion
+of it, thus forming a work based on the Program, and copy and
+distribute such modifications or work under the terms of Section 1
+above, provided that you also meet all of these conditions:
+
+\begin{enumerate}
+
+\item 
+
+You must cause the modified files to carry prominent notices stating that
+you changed the files and the date of any change.
+
+\item
+
+You must cause any work that you distribute or publish, that in
+whole or in part contains or is derived from the Program or any
+part thereof, to be licensed as a whole at no charge to all third
+parties under the terms of this License.
+
+\item
+If the modified program normally reads commands interactively
+when run, you must cause it, when started running for such
+interactive use in the most ordinary way, to print or display an
+announcement including an appropriate copyright notice and a
+notice that there is no warranty (or else, saying that you provide
+a warranty) and that users may redistribute the program under
+these conditions, and telling the user how to view a copy of this
+License.  (Exception: if the Program itself is interactive but
+does not normally print such an announcement, your work based on
+the Program is not required to print an announcement.)
+
+\end{enumerate}
+
+
+These requirements apply to the modified work as a whole.  If
+identifiable sections of that work are not derived from the Program,
+and can be reasonably considered independent and separate works in
+themselves, then this License, and its terms, do not apply to those
+sections when you distribute them as separate works.  But when you
+distribute the same sections as part of a whole which is a work based
+on the Program, the distribution of the whole must be on the terms of
+this License, whose permissions for other licensees extend to the
+entire whole, and thus to each and every part regardless of who wrote it.
+
+Thus, it is not the intent of this section to claim rights or contest
+your rights to work written entirely by you; rather, the intent is to
+exercise the right to control the distribution of derivative or
+collective works based on the Program.
+
+In addition, mere aggregation of another work not based on the Program
+with the Program (or with a work based on the Program) on a volume of
+a storage or distribution medium does not bring the other work under
+the scope of this License.
+
+\item
+You may copy and distribute the Program (or a work based on it,
+under Section 2) in object code or executable form under the terms of
+Sections 1 and 2 above provided that you also do one of the following:
+
+\begin{enumerate}
+
+\item
+
+Accompany it with the complete corresponding machine-readable
+source code, which must be distributed under the terms of Sections
+1 and 2 above on a medium customarily used for software interchange; or,
+
+\item
+
+Accompany it with a written offer, valid for at least three
+years, to give any third party, for a charge no more than your
+cost of physically performing source distribution, a complete
+machine-readable copy of the corresponding source code, to be
+distributed under the terms of Sections 1 and 2 above on a medium
+customarily used for software interchange; or,
+
+\item
+
+Accompany it with the information you received as to the offer
+to distribute corresponding source code.  (This alternative is
+allowed only for noncommercial distribution and only if you
+received the program in object code or executable form with such
+an offer, in accord with Subsection b above.)
+
+\end{enumerate}
+
+
+The source code for a work means the preferred form of the work for
+making modifications to it.  For an executable work, complete source
+code means all the source code for all modules it contains, plus any
+associated interface definition files, plus the scripts used to
+control compilation and installation of the executable.  However, as a
+special exception, the source code distributed need not include
+anything that is normally distributed (in either source or binary
+form) with the major components (compiler, kernel, and so on) of the
+operating system on which the executable runs, unless that component
+itself accompanies the executable.
+
+If distribution of executable or object code is made by offering
+access to copy from a designated place, then offering equivalent
+access to copy the source code from the same place counts as
+distribution of the source code, even though third parties are not
+compelled to copy the source along with the object code.
+
+\item
+You may not copy, modify, sublicense, or distribute the Program
+except as expressly provided under this License.  Any attempt
+otherwise to copy, modify, sublicense or distribute the Program is
+void, and will automatically terminate your rights under this License.
+However, parties who have received copies, or rights, from you under
+this License will not have their licenses terminated so long as such
+parties remain in full compliance.
+
+\item
+You are not required to accept this License, since you have not
+signed it.  However, nothing else grants you permission to modify or
+distribute the Program or its derivative works.  These actions are
+prohibited by law if you do not accept this License.  Therefore, by
+modifying or distributing the Program (or any work based on the
+Program), you indicate your acceptance of this License to do so, and
+all its terms and conditions for copying, distributing or modifying
+the Program or works based on it.
+
+\item
+Each time you redistribute the Program (or any work based on the
+Program), the recipient automatically receives a license from the
+original licensor to copy, distribute or modify the Program subject to
+these terms and conditions.  You may not impose any further
+restrictions on the recipients' exercise of the rights granted herein.
+You are not responsible for enforcing compliance by third parties to
+this License.
+
+\item
+If, as a consequence of a court judgment or allegation of patent
+infringement or for any other reason (not limited to patent issues),
+conditions are imposed on you (whether by court order, agreement or
+otherwise) that contradict the conditions of this License, they do not
+excuse you from the conditions of this License.  If you cannot
+distribute so as to satisfy simultaneously your obligations under this
+License and any other pertinent obligations, then as a consequence you
+may not distribute the Program at all.  For example, if a patent
+license would not permit royalty-free redistribution of the Program by
+all those who receive copies directly or indirectly through you, then
+the only way you could satisfy both it and this License would be to
+refrain entirely from distribution of the Program.
+
+If any portion of this section is held invalid or unenforceable under
+any particular circumstance, the balance of the section is intended to
+apply and the section as a whole is intended to apply in other
+circumstances.
+
+It is not the purpose of this section to induce you to infringe any
+patents or other property right claims or to contest validity of any
+such claims; this section has the sole purpose of protecting the
+integrity of the free software distribution system, which is
+implemented by public license practices.  Many people have made
+generous contributions to the wide range of software distributed
+through that system in reliance on consistent application of that
+system; it is up to the author/donor to decide if he or she is willing
+to distribute software through any other system and a licensee cannot
+impose that choice.
+
+This section is intended to make thoroughly clear what is believed to
+be a consequence of the rest of this License.
+
+\item
+If the distribution and/or use of the Program is restricted in
+certain countries either by patents or by copyrighted interfaces, the
+original copyright holder who places the Program under this License
+may add an explicit geographical distribution limitation excluding
+those countries, so that distribution is permitted only in or among
+countries not thus excluded.  In such case, this License incorporates
+the limitation as if written in the body of this License.
+
+\item
+The Free Software Foundation may publish revised and/or new versions
+of the General Public License from time to time.  Such new versions will
+be similar in spirit to the present version, but may differ in detail to
+address new problems or concerns.
+
+Each version is given a distinguishing version number.  If the Program
+specifies a version number of this License which applies to it and ``any
+later version'', you have the option of following the terms and conditions
+either of that version or of any later version published by the Free
+Software Foundation.  If the Program does not specify a version number of
+this License, you may choose any version ever published by the Free Software
+Foundation.
+
+\item
+If you wish to incorporate parts of the Program into other free
+programs whose distribution conditions are different, write to the author
+to ask for permission.  For software which is copyrighted by the Free
+Software Foundation, write to the Free Software Foundation; we sometimes
+make exceptions for this.  Our decision will be guided by the two goals
+of preserving the free status of all derivatives of our free software and
+of promoting the sharing and reuse of software generally.
+
+\begin{center}
+{\Large\sc
+No Warranty
+}
+\end{center}
+
+\item
+{\sc Because the program is licensed free of charge, there is no warranty
+for the program, to the extent permitted by applicable law.  Except when
+otherwise stated in writing the copyright holders and/or other parties
+provide the program ``as is'' without warranty of any kind, either expressed
+or implied, including, but not limited to, the implied warranties of
+merchantability and fitness for a particular purpose.  The entire risk as
+to the quality and performance of the program is with you.  Should the
+program prove defective, you assume the cost of all necessary servicing,
+repair or correction.}
+
+\item
+{\sc In no event unless required by applicable law or agreed to in writing
+will any copyright holder, or any other party who may modify and/or
+redistribute the program as permitted above, be liable to you for damages,
+including any general, special, incidental or consequential damages arising
+out of the use or inability to use the program (including but not limited
+to loss of data or data being rendered inaccurate or losses sustained by
+you or third parties or a failure of the program to operate with any other
+programs), even if such holder or other party has been advised of the
+possibility of such damages.}
+
+\end{enumerate}
+
+\newpage
+\section{References}
+\bibliography{usersbib}
+
+\end{document}
+

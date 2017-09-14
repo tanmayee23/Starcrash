@@ -1,0 +1,619 @@
+**************************************************************
+c     This file is part of the StarCrash code
+c     Version 1.0
+c
+c     Copyright 2003, by Joshua Faber
+c     This code is publicly available under the terms of the
+c     GNU General Public License.  See our documentation, or
+c     http://www.gnu.org/licenses/gpl.html for more details.
+***************************************************************
+
+      SUBROUTINE CHECKPT
+      IMPLICIT NONE
+*****************************************************
+c     Release 1.0
+c     Writes Checkpoint file restart.sph every NITCH iterations using DUMP
+c     Called by MAINIT
+c     Calls DUMP
+************************************************** 
+      INTEGER NITCH
+      PARAMETER (NITCH=25)
+      INCLUDE 'spha.h'                                          
+
+      IF (MOD(NIT,NITCH).EQ.0) THEN
+         WRITE (6,*) 
+     $        'CHECKPT: writing local checkpt file at NIT=',NIT
+         OPEN(12,FILE='restart.sph',FORM='UNFORMATTED')
+         CALL DUMP(12)
+         CLOSE (12)
+      ENDIF
+
+      RETURN
+      END
+********************************************************************
+      SUBROUTINE DUMP(IU)
+      IMPLICIT NONE
+*****************************************************
+c     Release 1.0
+C     Writes binary dump file to unit IU.
+C     This routine contains the standard format for all
+C     binary dump files.
+c     Writes Checkpoint file restart.sph every NITCH iterations using DUMP
+c     The format must match that found in subroutine INIT!
+c     Called by CHECKPT,DUOUT
+************************************************** 
+      INCLUDE 'spha.h'                                          
+
+      INTEGER iu,i
+
+      WRITE (IU) N,NNOPT,HMIN,HMAX,GAM,SEP0,
+     $     TF,DTOUT,NOUT,NLEFT,NIT,T,NAV,ALPHA,BETA,ETA2,
+     $     NGR,XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,ZGRMAX,
+     $     XGRLIM,YGRLIM,ZGRLIM,NRELAX,TRELAX,initgr,
+     $     ngravrad,sol,q2xx,q2xy,q2xz,q2yy,q2yz,q2zz
+      DO I=1,N
+       WRITE (IU) 
+     $       X(I),Y(I),Z(I),AM(I),HP(I),RHO(I),VX(I),VY(I),VZ(I),
+     $       VXDOT(I),VYDOT(I),VZDOT(I),A(I),ADOT(I),
+     $       GX(I),GY(I),GZ(I),GRPOT(I),ux(i),uy(i),uz(i)
+      ENDDO
+      WRITE (IU) N,nleft
+C     (to check that file was not corrupted)
+
+      RETURN
+      END
+********************************************************************
+      SUBROUTINE OUTPUT
+      IMPLICIT NONE
+*****************************************************
+c     Release 1.0
+c     Synchronizes velocity to full timestep, and writes to output files
+c     Called by MAINIT
+c     Calls ENOUT,BIOUT,GWOUT,DENSPLOT,DUOUT
+************************************************** 
+      INCLUDE 'spha.h'                                          
+
+      REAL dth
+      INTEGER i
+      
+C     Synchronize velocities with positions:
+      DTH=0.5*DT
+      DO I=1,N
+         VXS(I)=VX(I)-DTH*VXDOT(I)
+         VYS(I)=VY(I)-DTH*VYDOT(I)
+         VZS(I)=VZ(I)-DTH*VZDOT(I)
+      ENDDO
+      
+C     Output at every iteration:
+      CALL ENOUT
+      if(nrelax.eq.0)then
+         call biout		
+         call gwout	
+c         call densplot 
+      endif
+      
+C     Output every DTOUT:
+      IF (DTOUT.GT.0.) THEN
+         IF ((T.GE.FLOAT(NOUT)*DTOUT).OR.(T.GE.TF)) THEN
+            CALL DUOUT
+            NOUT=NOUT+1
+         ENDIF
+      ELSE IF (DTOUT.LT.0.) THEN
+C     (if DTOUT<0, interpret as a number of iterations)
+         IF ((NIT.GE.NOUT*INT(ABS(DTOUT))).OR.(T.GE.TF)) THEN
+            CALL DUOUT
+            NOUT=NOUT+1
+         ENDIF         
+      ENDIF
+      
+      RETURN
+      END
+********************************************************************
+      SUBROUTINE ENOUT
+      IMPLICIT NONE
+*****************************************************
+c     Release 1.0
+c     Calculates energy-related quantities, and writes summary to screen
+c     and file "energy.sph"
+c     Called by OUTPUT
+************************************************** 
+
+      INCLUDE 'spha.h'                                          
+
+      REAL TINY
+      PARAMETER (TINY=1.E-10)
+
+      REAL xmin,xmax,ymin,ymax,zmin,zmax,amtot,amtot1,xcm1,ycm1,zcm1
+      REAL vcmx1,vcmy1,vcmz1,amtot2,xcm2,ycm2,zcm2,vcmx2,vcmy2,vcmz2
+      REAL xcm,ycm,zcm,vcmx,vcmy,vcmz,ajx,ajy,ajz,ajx1,ajy1,ajz1
+      REAL ajp1,ajm1,ajx2,ajy2,ajz2,ajm2,ajp2,xplus,xminus,vplus
+      REAL vminus,vcm,ajtot,ekin,eint,stot,v2i,epot,etot,virsum
+      REAL rhomin,rhomax,amin,amax,hpmax,hpmin,rhoi,ai,hpi,omeg
+      INTEGER i,nnemin,nnemax,nneavr,nnesig,irhomax,irhomin
+      INTEGER iamax,iamin,ihpmax,ihpmin
+      
+C     Find system box and center of mass:
+      XMIN=1.E30
+      YMIN=1.E30
+      ZMIN=1.E30
+      XMAX=-1.E30
+      YMAX=-1.E30
+      ZMAX=-1.E30
+      AMTOT=0.
+      AMTOT1=0.
+      XCM1=0.
+      YCM1=0.
+      ZCM1=0.
+      VCMX1=0.
+      VCMY1=0.
+      VCMZ1=0.
+      AMTOT2=0.
+      XCM2=0.
+      YCM2=0.
+      ZCM2=0.
+      VCMX2=0.
+      VCMY2=0.
+      VCMZ2=0.
+      XCM=0.
+      YCM=0.
+      ZCM=0.
+      VCMX=0.
+      VCMY=0.
+      VCMZ=0.
+      AJX=0.
+      AJY=0.
+      AJZ=0.
+      AJx1=0.
+      ajy1=0.
+      ajz1=0.
+      ajp1=0.
+      ajm1=0.
+      AJx2=0.
+      ajy2=0.
+      ajz2=0.
+      ajp2=0.
+      ajm2=0.
+      do i=1,nleft
+         AMTOT1=AMTOT1+AM(I)
+         XCM1=XCM1+AM(I)*X(I)
+         YCM1=YCM1+AM(I)*Y(I)
+         ZCM1=ZCM1+AM(I)*Z(I)
+         VCMX1=VCMX1+AM(I)*VXS(I)
+         VCMY1=VCMY1+AM(I)*VYS(I)
+         VCMZ1=VCMZ1+AM(I)*VZS(I)
+      enddo
+      if(nleft.lt.n) then
+         do i=nleft+1,n
+            AMTOT2=AMTOT2+AM(I)
+            XCM2=XCM2+AM(I)*X(I)
+            YCM2=YCM2+AM(I)*Y(I)
+            ZCM2=ZCM2+AM(I)*Z(I)
+            VCMX2=VCMX2+AM(I)*VXS(I)
+            VCMY2=VCMY2+AM(I)*VYS(I)
+            VCMZ2=VCMZ2+AM(I)*VZS(I)
+         enddo
+      endif
+      XCM1=XCM1/AMTOT1
+      YCM1=YCM1/AMTOT1
+      ZCM1=ZCM1/AMTOT1
+      VCMX1=VCMX1/AMTOT1
+      VCMY1=VCMY1/AMTOT1
+      VCMZ1=VCMZ1/AMTOT1
+      if(nleft.lt.n)then
+         XCM2=XCM2/AMTOT2
+         YCM2=YCM2/AMTOT2
+         ZCM2=ZCM2/AMTOT2
+         VCMX2=VCMX2/AMTOT2
+         VCMY2=VCMY2/AMTOT2
+         VCMZ2=VCMZ2/AMTOT2
+      endif
+      do i=1,nleft
+         xplus=(x(i)-xcm1+y(i)-ycm1)/sqrt(2.0)
+         xminus=(x(i)-xcm1-y(i)+ycm1)/sqrt(2.0)
+         vplus=(vx(i)-vcmx1+vy(i)-vcmy1)/sqrt(2.0)
+         vminus=(vx(i)-vcmx1-vy(i)+vcmy1)/sqrt(2.0)
+         ajx1=ajx1+am(i)*
+     $        ((y(i)-ycm1)*(vz(i)-vcmz1)-(z(i)-zcm1)*(vy(i)-vcmy1))
+         ajy1=ajy1+am(i)*
+     $        ((z(i)-zcm1)*(vx(i)-vcmx1)-(x(i)-xcm1)*(vz(i)-vcmz1))
+         ajz1=ajz1+am(i)*
+     $        ((x(i)-xcm1)*(vy(i)-vcmy1)-(y(i)-ycm1)*(vx(i)-vcmx1))
+         ajm1=ajm1+am(i)*
+     $        (xplus*(vz(i)-vcmz1)-(z(i)-zcm1)*vplus)
+         ajp1=ajp1+am(i)*
+     $        (xminus*(vz(i)-vcmz1)-(z(i)-zcm1)*vminus)
+      enddo
+      if(nleft.lt.n)then
+         do i=nleft+1,n
+         xplus=(x(i)-xcm2+y(i)-ycm2)/sqrt(2.0)
+         xminus=(x(i)-xcm2-y(i)+ycm2)/sqrt(2.0)
+         vplus=(vx(i)-vcmx2+vy(i)-vcmy2)/sqrt(2.0)
+         vminus=(vx(i)-vcmx2-vy(i)+vcmy2)/sqrt(2.0)
+         ajx2=ajx2+am(i)*
+     $        ((y(i)-ycm2)*(vz(i)-vcmz2)-(z(i)-zcm2)*(vy(i)-vcmy2))
+         ajy2=ajy2+am(i)*
+     $        ((z(i)-zcm2)*(vx(i)-vcmx2)-(x(i)-xcm2)*(vz(i)-vcmz2))
+         ajz2=ajz2+am(i)*
+     $        ((x(i)-xcm2)*(vy(i)-vcmy2)-(y(i)-ycm2)*(vx(i)-vcmx2))
+         ajm2=ajm2+am(i)*
+     $        (xplus*(vz(i)-vcmz2)-(z(i)-zcm2)*vplus)
+         ajp2=ajp2+am(i)*
+     $        (xminus*(vz(i)-vcmz2)-(z(i)-zcm2)*vminus)
+         enddo
+      endif
+      if(myrank.eq.0)write(6,*)'Center of Mass-1, x:',
+     $     xcm1,ycm1,zcm1
+      if(myrank.eq.0)write(6,*)'Center of mass-1, V (w/o omega):',
+     $     vcmx1,vcmy1,vcmz1
+      if(nleft.lt.n)then
+         if(myrank.eq.0)write(6,*)'Center of Mass-2, x:',
+     $        xcm2,ycm2,zcm2
+         if(myrank.eq.0)write(6,*)'Center of mass-2, V (w/o omega):',
+     $        vcmx2,vcmy2,vcmz2
+      endif
+c     if(myrank.eq.0)write(6,*)'spin-1',ajx1,ajy1,ajz1
+c      if(myrank.eq.0)write(6,*)'spins-1',t,ajm1,ajp1
+c      if(myrank.eq.0)write(6,*)'spin-2',ajx2,ajy2,ajz2
+c      if(myrank.eq.0)write(6,*)'spins-2',t,ajm2,ajp2
+
+      if(myrank.eq.0)write(78,'(13e15.7)')
+     $     t,xcm1,ycm1,zcm1,vcmx1,vcmy1,vcmz1,
+     $     xcm2,ycm2,zcm2,vcmx2,vcmy2,vcmz2
+      if(myrank.eq.0)write(77,'(11e15.7)')t,ajx1,ajy1,ajz1,ajp1,ajm1,
+     $     ajx2,ajy2,ajz2,ajp2,ajm2
+      DO I=1,N
+         XMIN=MIN(X(I),XMIN)
+         YMIN=MIN(Y(I),YMIN)
+         ZMIN=MIN(Z(I),ZMIN)
+         XMAX=MAX(X(I),XMAX)
+         YMAX=MAX(Y(I),YMAX)
+         ZMAX=MAX(Z(I),ZMAX)
+         AMTOT=AMTOT+AM(I)
+         XCM=XCM+AM(I)*X(I)
+         YCM=YCM+AM(I)*Y(I)
+         ZCM=ZCM+AM(I)*Z(I)
+         VCMX=VCMX+AM(I)*VXS(I)
+         VCMY=VCMY+AM(I)*VYS(I)
+         VCMZ=VCMZ+AM(I)*VZS(I)
+      ENDDO
+      XCM=XCM/AMTOT
+      YCM=YCM/AMTOT
+      ZCM=ZCM/AMTOT
+      VCMX=VCMX/AMTOT
+      VCMY=VCMY/AMTOT
+      VCMZ=VCMZ/AMTOT
+
+      if(myrank.eq.0)write(6,*)'Center of Mass, x:',
+     $     xcm,ycm,zcm,'V:',vcmx,vcmy,vcmz
+
+      do i=1,n
+         if(nrelax.gt.0) then
+            omeg=sqrt(omega2)
+            vxs(i)=vxs(i)-vcmx-omeg*y(i)
+            vys(i)=vys(i)-vcmy+omeg*x(i)
+            vzs(i)=vzs(i)-vcmz
+         else
+            vxs(i)=vxs(i)-vcmx
+            vys(i)=vys(i)-vcmy
+            vzs(i)=vzs(i)-vcmz
+         endif
+         xm2(i)=x(i)-xcm
+         ym2(i)=y(i)-ycm
+         zm2(i)=z(i)-zcm
+         AJX=AJX+AM(I)*(Ym2(I)*VZS(I)-Zm2(I)*VYS(I))
+         AJY=AJY+AM(I)*(Zm2(I)*VXS(I)-Xm2(I)*VZS(I))
+         AJZ=AJZ+AM(I)*(Xm2(I)*VYS(I)-Ym2(I)*VXS(I))
+      enddo
+
+      VCM=SQRT(VCMX**2+VCMY**2+VCMZ**2)
+      AJTOT=SQRT(AJX**2+AJY**2+AJZ**2)
+
+C     Calculate energies and entropy:
+      EKIN=0.
+      EINT=0.
+      STOT=0.
+      DO I=1,N
+         V2I=VXS(I)**2+VYS(I)**2+VZS(I)**2
+         EKIN=EKIN+AM(I)*V2I
+         if(nn(i).ne.0) then
+            EINT=EINT+AM(I)*(A(I)*RHO(I)**(GAM-1.))
+            STOT=STOT+AM(I)*LOG((A(I)+TINY)/(GAM-1.))
+         ENDIF
+      ENDDO
+      EKIN=0.5*EKIN
+      EINT=EINT/(GAM-1.)
+      STOT=STOT/(GAM-1.)
+
+      EPOT=0.
+      IF (NGR.NE.0) THEN
+         DO I=1,N
+            EPOT=EPOT+AM(I)*GRPOT(I)
+         ENDDO
+         EPOT=0.5*EPOT
+      ENDIF      
+      ETOT=EPOT+EKIN+EINT
+      VIRSUM=3.*(GAM-1.)*EINT+EPOT+2.*EKIN
+
+C     Perform neighbor statistics:
+      NNEMIN=10000
+      NNEMAX=0
+      NNEAVR=0
+      NNESIG=0
+      DO I=1,N
+         NNEMIN=MIN(NNEMIN,NN(I))
+         NNEMAX=MAX(NNEMAX,NN(I))
+         NNEAVR=NNEAVR+NN(I)
+         NNESIG=NNESIG+NN(I)**2
+      ENDDO
+      NNEAVR=INT(FLOAT(NNEAVR)/FLOAT(N))
+      NNESIG=INT(SQRT(FLOAT(NNESIG)/FLOAT(N)-FLOAT(NNEAVR)**2))
+
+C     Get min/max values of various quantities:
+      RHOMIN=1.E30
+      RHOMAX=0.
+      irhomin=0
+      irhomax=0
+      AMIN=1.E30
+      AMAX=0.
+      iamin=0
+      iamax=0
+      HPMAX=0.
+      HPMIN=1.E30
+      ihpmin=0
+      ihpmax=0
+      DO I=1,N
+         IF (NN(I).NE.0) THEN
+            RHOI=RHO(I)
+            IF (RHOI.LT.RHOMIN) THEN
+               IRHOMIN=I
+               RHOMIN=RHOI
+            ENDIF
+            IF (RHOI.GT.RHOMAX) THEN
+               IRHOMAX=I
+               RHOMAX=RHOI
+            ENDIF
+            AI=A(I)
+            IF (AI.LT.AMIN) THEN
+               IAMIN=I
+               AMIN=AI
+            ENDIF
+            IF (AI.GT.AMAX) THEN
+               IAMAX=I
+               AMAX=AI
+            ENDIF
+            HPI=HP(I)
+            IF (HPI.LT.HPMIN) THEN
+               IHPMIN=I
+               HPMIN=HPI
+            ENDIF
+            IF (HPI.GT.HPMAX) THEN
+               IHPMAX=I
+               HPMAX=HPI
+            ENDIF
+         ENDIF
+      ENDDO
+      WRITE (6,90) NIT,T,
+     $     XMIN,XMAX,YMIN,YMAX,ZMIN,ZMAX,
+     $     EPOT,EKIN,EINT,VIRSUM,ETOT,STOT,VCM,AJTOT,
+     $     NNEAVR,NNESIG,NNEMIN,NNEMAX,
+     $     RHOMIN,X(IRHOMIN),Y(IRHOMIN),Z(IRHOMIN),
+     $     RHOMAX,X(IRHOMAX),Y(IRHOMAX),Z(IRHOMAX),
+     $     AMIN,X(IAMIN),Y(IAMIN),Z(IAMIN),
+     $     AMAX,X(IAMAX),Y(IAMAX),Z(IAMAX),
+     $     HPMIN,X(IHPMIN),Y(IHPMIN),Z(IHPMIN),
+     $     HPMAX,X(IHPMAX),Y(IHPMAX),Z(IHPMAX)
+ 90   FORMAT(/,
+     $  ' OUTPUT: end of iteration ',I4,'         time=',F10.4,/,
+     $  '   System box= ',E10.4,'< x <',E10.4,/,
+     $  '               ',E10.4,'< y <',E10.4,/,
+     $  '               ',E10.4,'< z <',E10.4,/,
+     $  '   Energies: W=',E10.4,' T=',E10.4,' U=',E10.4,
+     $                                          ' vir=',E10.4,/,
+     $  '     Etot=',E10.4,' Stot=',E10.4,' Vcm=',E10.4,
+     $                                          ' Jtot=',E10.4,/,
+     $  '   Neighbors: avr=',I4,' sig=',I4,'  min=',I4,' max=',I4,/,
+     $  '   Density: rhomin=',E10.4,' at (',E10.4,',',E10.4,',',
+     $     E10.4,')',/,
+     $  '            rhomax=',E10.4,' at (',E10.4,',',E10.4,',',
+     $     E10.4,')',/,
+     $  '   Entropy: Amin=',E10.4,' at (',E10.4,',',E10.4,',',
+     $     E10.4,')',/,
+     $  '            Amax=',E10.4,' at (',E10.4,',',E10.4,',',
+     $     E10.4,')',/,
+     $  '   Smoothing: hmin=',E10.4,' at (',E10.4,',',E10.4,',',
+     $     E10.4,')',/,
+     $  '              hmax=',E10.4,' at (',E10.4,',',E10.4,',',
+     $     E10.4,')')
+
+C     Append results of iteration to file:
+      WRITE (72,'(8E15.7)')T,EPOT,EKIN,EINT,ETOT,STOT,ajtot,rhomax
+
+      RETURN
+      END
+********************************************************************
+      SUBROUTINE DUOUT
+      IMPLICIT NONE
+*****************************************************
+c     Release 1.0
+C     Write binary dump file containing complete current results
+c     Called by OUTPUT
+c     Calls DUMP
+************************************************** 
+C  Write binary dump file containing complete current results
+      INCLUDE 'spha.h'                                         
+      CHARACTER*16 OUTFN
+
+      WRITE(OUTFN,101) NOUT
+C 101  FORMAT('/sptmp/trace/out',
+ 101  FORMAT('out',I3.3,'.sph')
+
+      WRITE (6,*) 'DUOUT: writing file ',OUTFN,'at t=',T
+            
+      OPEN(13,FILE=OUTFN,form='unformatted')
+      CALL DUMP(13)
+      CLOSE (13)
+      
+      RETURN
+      END
+*********************************************************************
+      SUBROUTINE BIOUT
+      IMPLICIT NONE
+*****************************************************
+c     Release 1.0
+C     Writes file "biout.sph" with binary-related quantities
+c     Called by OUTPUT
+************************************************** 
+      INCLUDE 'spha.h'                                          
+
+      REAL amtot1,xcm1,ycm1,zcm1,rmax1,xbu,ybu,bu1
+      REAL amtot2,xcm2,ycm2,zcm2,rmax2,bu2,r12,albin
+      INTEGER i
+
+      xbu=0.
+      ybu=0.
+
+      AMTOT1=0.
+      XCM1=0.
+      YCM1=0.
+      ZCM1=0.
+C      VXCM1=0.
+C      VYCM1=0.
+C      VZCM1=0.
+      DO I=1,NLEFT
+        AMTOT1=AMTOT1+AM(I)
+        XCM1=XCM1+AM(I)*X(I)
+        YCM1=YCM1+AM(I)*Y(I)
+        ZCM1=ZCM1+AM(I)*Z(I)
+C        VXCM1=VXCM1+AM(I)*VXS(I)
+C        VYCM1=VYCM1+AM(I)*VYS(I)
+C        VZCM1=VZCM1+AM(I)*VZS(I)
+      ENDDO
+      XCM1=XCM1/AMTOT1
+      YCM1=YCM1/AMTOT1
+      ZCM1=ZCM1/AMTOT1
+C      VXCM1=VXCM1/AMTOT1
+C      VYCM1=VYCM1/AMTOT1
+C      VZCM1=VZCM1/AMTOT1
+
+      RMAX1=0.
+      DO I=1,NLEFT
+        RP=SQRT((X(I)-XCM1)**2+(Y(I)-YCM1)**2+(Z(I)-ZCM1)**2)
+        IF (RP.GT.RMAX1) THEN
+           RMAX1=RP
+           XBU=X(I)
+           YBU=Y(I)
+        ENDIF
+      ENDDO
+      BU1=ATAN((YBU-YCM1)/(XBU-XCM1))
+
+      AMTOT2=0.
+      XCM2=0.
+      YCM2=0.
+      ZCM2=0.
+C      VXCM2=0.
+C      VYCM2=0.
+C      VZCM2=0.
+      DO I=NLEFT+1,N
+        AMTOT2=AMTOT2+AM(I)
+        XCM2=XCM2+AM(I)*X(I)
+        YCM2=YCM2+AM(I)*Y(I)
+        ZCM2=ZCM2+AM(I)*Z(I)
+C        VXCM2=VXCM2+AM(I)*VXS(I)
+C        VYCM2=VYCM2+AM(I)*VYS(I)
+C        VZCM2=VZCM2+AM(I)*VZS(I)
+      ENDDO
+      XCM2=XCM2/AMTOT2
+      YCM2=YCM2/AMTOT2
+      ZCM2=ZCM2/AMTOT2
+C      VXCM2=VXCM2/AMTOT2
+C      VYCM2=VYCM2/AMTOT2
+C      VZCM2=VZCM2/AMTOT2
+
+      RMAX2=0.
+      DO I=NLEFT+1,N
+        RP=SQRT((X(I)-XCM2)**2+(Y(I)-YCM2)**2+(Z(I)-ZCM2)**2)
+        IF (RP.GT.RMAX2) THEN
+           RMAX2=RP
+           XBU=X(I)
+           YBU=Y(I)
+        ENDIF
+      ENDDO
+      BU2=-ATAN((YBU-YCM2)/(XBU-XCM2))
+
+      R12=SQRT((XCM1-XCM2)**2+(YCM1-YCM2)**2+(ZCM1-ZCM2)**2)
+C      EORB=0.5*AMTOT1*(VXCM1**2+VYCM1**2+VZCM1**2)
+C     $    +0.5*AMTOT2*(VXCM2**2+VYCM2**2+VZCM2**2)-AMTOT1*AMTOT2/R12
+C      AORB=AMTOT1*(XCM1*VYCM1-YCM1*VXCM1)
+C     $    +AMTOT2*(XCM2*VYCM2-YCM2*VXCM2)
+      ALBIN=ATAN((YCM2-YCM1)/(XCM2-XCM1))
+
+C Append results of iteration to file:
+
+      WRITE (73,'(7E14.6)') T,R12,ALBIN,RMAX1,RMAX2,BU1,BU2
+
+      WRITE (6,99) R12,RMAX1,RMAX2
+ 99   FORMAT('BIOUT: r=',F8.5,' Rl=',F8.4,' Rr=',F8.4)
+
+      RETURN
+      END
+***********************************************************************
+      SUBROUTINE GWOUT  
+      IMPLICIT NONE
+*****************************************************************
+c     Release 1.0
+C     Writes file "gwdata.sph" with gravity wave-related quantities
+c     Called by OUTPUT
+****************************************************************
+      INCLUDE 'spha.h'               
+
+      REAL qxxdd,qyydd,qzzdd,qxydd,qxzdd,qyzdd,xxbar,yybar,hplus,hcross
+      integer i
+                                                                       
+      QZZDD=0.                                                         
+      QYYDD=0.                                                         
+      QXXDD=0.                                                         
+      QXYDD=0.                                                         
+      QYZDD=0.                                                         
+      QXZDD=0.                                                         
+C     XGX=0.                                                           
+C     YGY=0.                                                           
+C     ZGZ=0.                                                           
+      DO I=1,N      
+        IF (NN(I).NE.0) THEN
+        QXXDD=QXXDD+AM(I)*(2.*VXS(I)**2+2.*A(I)*RHO(I)**(GAM-1.)       
+     $             +2.*Xm2(I)*GX(I))                                     
+        QYYDD=QYYDD+AM(I)*(2.*VYS(I)**2+2.*A(I)*RHO(I)**(GAM-1.)       
+     $             +2.*Ym2(I)*GY(I))                                     
+        QZZDD=QZZDD+AM(I)*(2.*VZS(I)**2+2.*A(I)*RHO(I)**(GAM-1.)       
+     $             +2.*Zm2(I)*GZ(I))                                     
+        QXYDD=QXYDD+AM(I)*(2.*VXS(I)*VYS(I)+
+     $       Xm2(I)*GY(I)+Ym2(I)*GX(I))     
+        QYZDD=QYZDD+AM(I)*(2.*VYS(I)*VZS(I)+
+     $       Ym2(I)*GZ(I)+Zm2(I)*GY(I))     
+        QXZDD=QXZDD+AM(I)*(2.*VXS(I)*VZS(I)+
+     $       Xm2(I)*GZ(I)+Zm2(I)*GX(I))     
+C       XGX=XGX+2.*AM(I)*X(I)*GX(I)                                    
+C       YGY=YGY+2.*AM(I)*Y(I)*GY(I)                                    
+C       ZGZ=ZGZ+2.*AM(I)*Z(I)*GZ(I)                                    
+        ENDIF 
+      ENDDO                                                           
+                                                                       
+c      WRITE (6,*) 'QXXDD=',QXXDD                                       
+c      WRITE (6,*) 'QYYDD=',QYYDD                                       
+c      WRITE (6,*) 'QZZDD=',QZZDD                                       
+C     WRITE (6,*) 'XGX=',XGX                                           
+C     WRITE (6,*) 'YGY=',YGY                                           
+C     WRITE (6,*) 'ZGZ=',ZGZ                                           
+      xxbar=(2.0*qxxdd-qyydd-qzzdd)/3.0
+      yybar=(2.0*qyydd-qxxdd-qzzdd)/3.0
+      hplus=xxbar-yybar
+      hcross=2.0*qxydd
+      WRITE (6,*) 'Hplus= ',hplus,' Hcross= ',hcross             
+
+C Append results of iteration to file:
+      WRITE (74,'(7E15.7)') T,QXXDD,QYYDD,QZZDD,QXYDD,QYZDD,QXZDD 
+                                                                       
+      RETURN                                                           
+      END                                                              
+
+
