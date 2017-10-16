@@ -169,8 +169,11 @@ C     This call to gravquant is redundant, but safe
 C Advance velocities to half-timestep:
       CALL NENE
       CALL RHOS
-      CALL VDOTS
-      CALL TSTEP
+
+ 2    if(ntimestepper.eq.1)then
+         if(myrank.eq.0)write (6,*) 'yo!'
+         CALL VDOTS
+         CALL TSTEP
          DTH=0.5*DT
          if(myrank.eq.0) write(6,*)'Initial dth=',dth
          DO I=1,N
@@ -179,6 +182,8 @@ C Advance velocities to half-timestep:
             VZ(I)=VZ(I)+VZDOT(I)*DTH
          ENDDO
          if(myrank.eq.0) write(6,*) 'LFSTART: closing'
+      else 
+      end if
       RETURN
       END
 

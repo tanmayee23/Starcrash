@@ -2,7 +2,7 @@
 #
 MPID      = /home/software/mpich/include
 FFTDIR    = /home/software/fftw/fftw-2.0.1
-SFFTDIR   = $(FFTDIR)/li
+SFFTDIR   = $(FFTDIR)/lib
 RFFTDIR   = $(FFTDIR)/rfftw
 MPIDIR    = $(FFTDIR)/mpi
 TMPIDIR   = $(MPIDIR)/transpose_mpi

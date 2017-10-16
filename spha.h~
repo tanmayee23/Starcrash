@@ -10,7 +10,7 @@ c     http://www.gnu.org/licenses/gpl.html for more details.
 
 C     NUMBER OF PROCESSORS
       INTEGER NPROCS
-      PARAMETER (NPROCS=2)
+      PARAMETER (NPROCS=4)
 c     Particle Parameters
       INTEGER NMAX,NMAXP,NNMAX
       PARAMETER (NMAX=100000,NMAXP=(NMAX-1)/NPROCS+1,NNMAX=200)
@@ -39,7 +39,7 @@ C     BINARYP: Binary parameters
       INTEGER NLEFT
       REAL SEP0,QDAR,AMNS,RNS,RP,VPEAK
 C     INTPAR: Input parameters
-      INTEGER N,NNOPT
+      INTEGER N,NNOPT,NTIMESTEPPER
       REAL GAM,HMIN,HMAX
 C     OUTP: Output parameters
       INTEGER NOUT,NIT
@@ -73,7 +73,7 @@ C     gravrad: quantities for computing gravitational radiation losses
      $             ZGRMAX,XGRLIM,YGRLIM,ZGRLIM
       COMMON/RELAXP/ NRELAX,TRELAX,TRELOFF,OMEGA2
       COMMON/BINARYP/ NLEFT,SEP0,QDAR,AMNS,RNS,RP,VPEAK
-      COMMON/INTPAR/ GAM,N,NNOPT,HMIN,HMAX
+      COMMON/INTPAR/ GAM,N,NNOPT,NTIMESTEPPER,HMIN,HMAX
       COMMON/OUTP/ DT,T,VXS,VYS,VZS,TF,DTOUT,NOUT,NIT,xm2,ym2,zm2     
       COMMON/WTABUL/ WTAB,DWTAB,CTAB                        
       COMMON/PART/X,Y,Z,VX,VY,VZ,AM,HP,A,RHO,POR2,GRPOT  
@@ -88,6 +88,6 @@ C     gravrad: quantities for computing gravitational radiation losses
       NAMELIST/INPUT/ TF,DTOUT,GAM,N,NNOPT,NAV,ALPHA,BETA,ETA2,
      $      NGR,XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,
      $      ZGRMAX,XGRLIM,YGRLIM,ZGRLIM,HMIN,HMAX,NRELAX,TRELAX,SEP0,
-     $      QDAR,AMNS,RNS,RP,VPEAK,TRELOFF,NGRAVRAD,SOL
+  $      QDAR,AMNS,RNS,RP,VPEAK,TRELOFF,NGRAVRAD,SOL,NTIMESTEPPER
 
 

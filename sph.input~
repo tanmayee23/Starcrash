@@ -31,5 +31,5 @@
  TRELOFF=   1.04999995     ,
  NGRAVRAD=           0 ,
  SOL=   1000.00000     ,
-NTIMESTEPPER=     0 ,
+NTIMESTEPPER=     1 ,
  &END 

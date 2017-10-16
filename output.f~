@@ -50,7 +50,7 @@ c     Called by CHECKPT,DUOUT
      $     TF,DTOUT,NOUT,NLEFT,NIT,T,NAV,ALPHA,BETA,ETA2,
      $     NGR,XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,ZGRMAX,
      $     XGRLIM,YGRLIM,ZGRLIM,NRELAX,TRELAX,initgr,
-     $     ngravrad,sol,ntimestepper,q2xx,q2xy,q2xz,q2yy,q2yz,q2zz
+     $     ngravrad,sol,q2xx,q2xy,q2xz,q2yy,q2yz,q2zz
       DO I=1,N
        WRITE (IU) 
      $       X(I),Y(I),Z(I),AM(I),HP(I),RHO(I),VX(I),VY(I),VZ(I),

@@ -117,7 +117,7 @@ C Advance particle positions and velocities:
       if(ntimestepper.eq.0)CALL ADVANCE
       if(ntimestepper.eq.1)CALL ADVANCE_EULER
       if(ntimestepper.eq.2)CALL ADVANCE_RK2   
-      if(ntimestepper.eq.3)CALL ADVANCE_RK4
+         
 
 C Recalculate smoothing lengths:
       CALL ADJUST

@@ -522,6 +522,7 @@ C     Advance entropies from original values:
             A(I)=A(I)+DT*ADOT(I)
          ENDDO
       ENDIF
+C     Advance positions to full timestep:
 
       DO I=1,N
             Xold(I)=X(I)
