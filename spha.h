@@ -89,5 +89,3 @@ C     gravrad: quantities for computing gravitational radiation losses
      $      NGR,XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,
      $      ZGRMAX,XGRLIM,YGRLIM,ZGRLIM,HMIN,HMAX,NRELAX,TRELAX,SEP0,
      $      QDAR,AMNS,RNS,RP,VPEAK,TRELOFF,NGRAVRAD,SOL,NTIMESTEPPER
-
-

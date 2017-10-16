@@ -1,7 +1,4 @@
 **************************************************************
-
-
-
 c     This file is part of the StarCrash code
 c     Version 1.0
 c
@@ -181,8 +178,6 @@ C Advance velocities to half-timestep:
          if(myrank.eq.0) write(6,*) 'LFSTART: closing'
       RETURN
       END
-
-
 
 
 
