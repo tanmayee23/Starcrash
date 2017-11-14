@@ -501,12 +501,12 @@ c     Calls NENE,RHOS,ADOTS,CMADJ,VDOTS
       REAL UTINY
       PARAMETER (UTINY=1.E-10)
 
-      REAL AO(NMAX), K1_X(NMAX),K1_Y(NMAX),K1_Z(NMAX)
+      REAL AOLD(NMAX), K1_X(NMAX),K1_Y(NMAX),K1_Z(NMAX)
       REAL DTH,K2_X(NMAX),K2_Y(NMAX),K2_Z(NMAX)
       REAL K1_VX(NMAX),K1_VY(NMAX),K1_VZ(NMAX)
       REAL K2_VX(NMAX),K2_VY(NMAX),K2_VZ(NMAX)
-      REAL Xold(NMAX),Yold(NMAX),Zold(NMAX)
-      REAL VXold(NMAX),VYold(NMAX),VZold(NMAX)
+      REAL Xold(NMAX),Yold(NMAX),Zold(NMAX),A2(NMAX)
+      REAL VXold(NMAX),VYold(NMAX),VZold(NMAX),A1(NMAX)
       INTEGER I
 
       DTH=0.5*DT
@@ -518,10 +518,11 @@ c     Calls NENE,RHOS,ADOTS,CMADJ,VDOTS
 C     Calculate Adot (only if AV is on, and relaxation is off):                                                                                               
          CALL ADOTS
 C     Advance entropies from original values:                                                                                                                 
-         DO I=1,N
-            A(I)=A(I)+DT*ADOT(I)
-         ENDDO
+!         DO I=1,N
+!            A(I)=A(I)+DT*ADOT(I)
+!         ENDDO
       ENDIF
+C     Advance positions to full timestep:
 
       DO I=1,N
             Xold(I)=X(I)
@@ -531,6 +532,9 @@ C     Advance entropies from original values:
             VXold(I)=VX(I)
             VYold(I)=VY(I)
             VZold(I)=VZ(I)
+            
+            Aold(I)=A(I)
+
 
        END DO
        DO I=1,N 
@@ -542,35 +546,46 @@ C     Advance entropies from original values:
             K1_VY(I)=VYDOT(I)
             K1_VZ(I)=VZDOT(I)
 
-            K2_X(I)=VX(I)+K1_VX(I)*DT
-            K2_Y(I)=VY(I)+K1_VY(I)*DT
-            K2_Z(I)=VZ(I)+K1_VZ(I)*DT
-       END DO 
-                         
-                                                                                        
-      DO I=1,N
-            X(I)=X(I)+DT*K1_X(I)
-            Y(I)=Y(I)+DT*K1_Y(I)
-            Z(I)=Z(I)+DT*K1_Z(I)
+            A1(I)=ADOT(I)
+
+       END DO     
+
+ 
+       DO I=1,N
+      
+            X(I)=XOLD(I)+DTH*K1_X(I)
+            Y(I)=YOLD(I)+DTH*K1_Y(I)
+            Z(I)=ZOLD(I)+DTH*K1_Z(I)
             
-            VX(I)=K2_X(I)
-            VY(I)=K2_Y(I)
-            VZ(I)=K2_Z(I)
-
+            VX(I)=VXold(I)+DTh*K1_VX(I)
+            VY(I)=VYold(I)+DTH*K1_VY(I)
+            VZ(I)=VZold(I)+DTH*K1_VZ(I)
+            
+            A(I)=Aold(I)+DTH*A1(I)
       ENDDO
-
+      
+      CALL NENE
+      CALL RHOS
       CALL VDOTS
+      CALL ADOTS
       
        DO I=1,N
+
+            K2_X(I)=VX(I)
+            K2_Y(I)=VY(I)
+            K2_Z(I)=VZ(I)
+          
             K2_VX(I)=VXDOT(I)
             K2_VY(I)=VYDOT(I)
             K2_VZ(I)=VZDOT(I)
-       ENDDO
+       
+            A2(I)=ADOT(I)
+         ENDDO
       
         DO I=1,N
-            X(I)=Xold(I)+DT*K1_X(I)+K1_VX(I)*DT*DT/2
-            Y(I)=Yold(I)+DT*K1_Y(I)+K1_VY(I)*DT*DT/2
-            Z(I)=Zold(I)+DT*K1_Z(I)+K1_VZ(I)*DT*DT/2
+            X(I)=Xold(I)+DT*K2_X(I)
+            Y(I)=Yold(I)+DT*K2_Y(I)
+            Z(I)=Zold(I)+DT*K2_Z(I)
 
       ENDDO
 
@@ -579,9 +594,11 @@ C     If binary relaxation problem, adjust center of mass positions:
       IF (NRELAX.GE.1) CALL CMADJ
 C     Advance velocities to full-timestep:                                                                                                                    
       DO I=1,N
-         VX(I)=VXold(I)+DT*(K1_VX(I)+K2_VX(I))/2
-         VY(I)=VYold(I)+DT*(K1_VY(I)+K2_VY(I))/2
-         VZ(I)=VZold(I)+DT*(K1_VZ(I)+K2_VZ(I))/2
+         VX(I)=VXold(I)+DT*K2_VX(I)
+         VY(I)=VYold(I)+DT*K2_VY(I)
+         VZ(I)=VZold(I)+DT*K2_VZ(I)
+      
+         A(I)=Aold(I)+A2(I)*DT
       ENDDO
 
       do i=1,n
@@ -628,6 +645,8 @@ c     Calls NENE,RHOS,ADOTS,CMADJ,VDOTS
       REAL K4_VX(NMAX),K4_VY(NMAX),K4_VZ(NMAX)
       REAL Xold(NMAX),Yold(NMAX),Zold(NMAX)
       REAL VXold(NMAX),VYold(NMAX),VZold(NMAX)
+      REAL AOLD(NMAX),A1(NMAX),A2(NMAX)
+      REAL A3(NMAX),A4(NMAX)
       INTEGER I
 
       DTH=0.5*DT
@@ -639,9 +658,9 @@ c     Calls NENE,RHOS,ADOTS,CMADJ,VDOTS
 C     Calculate Adot (only if AV is on, and relaxation is off):                                                                                           
          CALL ADOTS
 C     Advance entropies from original values:                                                                                                           
-         DO I=1,N
-            A(I)=A(I)+DT*ADOT(I)
-         ENDDO
+!         DO I=1,N
+ !           A(I)=A(I)+DT*ADOT(I)
+ !        ENDDO
       ENDIF
       DO I=1,N
             Xold(I)=X(I)
@@ -651,101 +670,132 @@ C     Advance entropies from original values:
             VXold(I)=VX(I)
             VYold(I)=VY(I)
             VZold(I)=VZ(I)
+ 
+           Aold(I)=A(I) 
       END do
       
       DO I=1,N
-            K1_X(I)=VXold(I)
-            K1_Y(I)=VYold(I)
-            K1_Z(I)=VZold(I)
+            K1_X(I)=VX(I)
+            K1_Y(I)=VY(I)
+            K1_Z(I)=VZ(I)
 
             K1_VX(I)=VXDOT(I)
             K1_VY(I)=VYDOT(I)
             K1_VZ(I)=VZDOT(I)
 
-            K2_X(I)=VXold(I)+K1_VX(I)*DT/2
-            K2_Y(I)=VYold(I)+K1_VY(I)*DT/2
-            K2_Z(I)=VZold(I)+K1_VZ(I)*DT/2
-      END DO
-       
-      !T=T+DT/2
-       
-      DO I=1,N
-          X(I)=Xold(I)+K1_X(I)*DT/2
-          Y(I)=Yold(I)+K1_Y(I)*DT/2
-          Z(I)=Zold(I)+K1_Z(I)*DT/2
-          
-          VX(I)=K2_X(I)
-          VY(I)=K2_Y(I)
-          VZ(I)=K2_Z(I)
-       
-      END DO
+            A1(I)=ADOT(I)
 
+
+            END DO
+
+            DO I=1,N
+
+            X(I)=XOLD(I)+DTH*K1_X(I)
+            Y(I)=YOLD(I)+DTH*K1_Y(I)
+            Z(I)=ZOLD(I)+DTH*K1_Z(I)
+
+            VX(I)=VXOLD(I)+DTH*K1_VX(I)
+            VY(I)=VYOLD(I)+DTH*K1_VY(I)
+            VZ(I)=VZOLD(I)+DTH*K1_VZ(I)
+
+            A(I)=AOLD(I)+DTH*A1(I)
+      END DO
+       
+      CALL NENE
+      CALL RHOS
       CALL VDOTS
+      CALL ADOTS
+       
       DO I=1,N
-          K2_VX(I)=VXDOT(I)
-          K2_VY(I)=VYDOT(I)
-          K2_VZ(I)=VZDOT(I)
+         K2_X(I)=VX(I)
+         K2_Y(I)=VY(I)
+         K2_Z(I)=VZ(I)
+
+         K2_VX(I)=VXDOT(I)
+         K2_VY(I)=VYDOT(I)
+         K2_VZ(I)=VZDOT(I)
+         
+         A2(I)=ADOT(I)
       END DO
 
       DO I=1,N
-          K3_X(I)=VXold(I)+K2_VX(I)*DT/2
-          K3_Y(I)=VYold(I)+K2_VY(I)*DT/2
-          K3_Z(I)=VZold(I)+K2_VZ(I)*DT/2
           
-          X(I)=Xold(I)+K2_X(I)*DT/2
-          Y(I)=Yold(I)+K2_Y(I)*DT/2
-          Z(I)=Zold(I)+K2_Z(I)*DT/2
+          X(I)=Xold(I)+K2_X(I)*DTH
+          Y(I)=Yold(I)+K2_Y(I)*DTH
+          Z(I)=Zold(I)+K2_Z(I)*DTH
           
-          VX(I)=K3_X(I)
-          VY(I)=K3_Y(I)
-          VZ(I)=K3_Z(I)
-          
+          VX(I)=VXOLD(I)+K2_VX(I)*DTH
+          VY(I)=VYOLD(I)+K2_VY(I)*DTH
+          VZ(I)=VZOLD(I)+K2_VZ(I)*DTH
+
+          A(I)=AOLD(I)+A2(I)*DTH
       END DO
 
+      CALL NENE
+      CALL RHOS
       CALL VDOTS
+      CALL ADOTS
 
       DO I=1,N
 
-          K3_VX(I)=VXDOT(I)
-          K3_VY(I)=VYDOT(I)
-          K3_VZ(I)=VZDOT(I)
-          
-          K4_X(I)=VXold(I)+K3_VX(I)*DT
-          K4_Y(I)=VYold(I)+K3_VY(I)*DT
-          K4_Z(I)=VZold(I)+K3_VZ(I)*DT
-          
+         K3_X(I)=VX(I)
+         K3_Y(I)=VY(I)
+         K3_Z(I)=VZ(I)
+
+
+         K3_VX(I)=VXDOT(I)
+         K3_VY(I)=VYDOT(I)
+         K3_VZ(I)=VZDOT(I)
+
+         A3(I)=ADOT(I)
+      
+         END DO
+
+         DO I=1,N
+
           X(I)=Xold(I)+K3_X(I)*DT
           Y(I)=Yold(I)+K3_Y(I)*DT
           Z(I)=Zold(I)+K3_Z(I)*DT
 
-          VX(I)=K4_X(I)
-          VY(I)=K4_Y(I)
-          VZ(I)=K4_Z(I)
+          VX(I)=VXOLD(I)+K3_VX(I)*DT
+          VY(I)=VYOLD(I)+K3_VY(I)*DT
+          VZ(I)=VZOLD(I)+K3_VZ(I)*DT
 
-      END DO 
+          A(I)=AOLD(I)+A3(I)*DT
 
-      !T=T+DT/2
+      END DO
+
+      CALL NENE
+      CALL RHOS
       CALL VDOTS
-
+      CALL ADOTS
+      
       DO I=1,N 
 
-          K4_VX(I)=VXDOT(I)
-          K4_VY(I)=VYDOT(I)
-          K4_VZ(I)=VZDOT(I)
-          
+         K4_X(I)=VX(I)
+         K4_Y(I)=VY(I)
+         K4_Z(I)=VZ(I)
+
+
+         K4_VX(I)=VXDOT(I)
+         K4_VY(I)=VYDOT(I)
+         K4_VZ(I)=VZDOT(I)
+
+         A4(I)=ADOT(I)
       END DO
 
 !       FINAL POSITIONS and VELOCITIES
       DO I=1,N
           
-         X(I)=Xold(I)+(K1_VX(I)+K2_VX(I)+K3_VX(I))*DT*DT/6+VXold(I)*DT
-         Y(I)=Yold(I)+(K1_VY(I)+K2_VY(I)+K3_VY(I))*DT*DT/6+VYold(I)*DT
-         Z(I)=Zold(I)+(K1_VZ(I)+K2_VZ(I)+K3_VZ(I))*DT*DT/6+VZold(I)*DT
+         X(I)=Xold(I)+DT*(K1_X(I)+2*K2_X(I)+2*K3_X(I)+K4_X(I))/6
+         Y(I)=Yold(I)+DT*(K1_Y(I)+2*K2_Y(I)+2*K3_Y(I)+K4_Y(I))/6
+         Z(I)=ZolD(I)+DT*(K1_Z(I)+2*K2_Z(I)+2*K3_Z(I)+K4_Z(I))/6
 
-          VX(I)=VXold(I)+DT*(K1_VX(I)+2*K2_VX(I)+2*K3_VX(I)+K4_VX(I))/6
-          VY(I)=VYold(I)+DT*(K1_VY(I)+2*K2_VY(I)+2*K3_VY(I)+K4_VY(I))/6
-          VZ(I)=VZold(I)+DT*(K1_VZ(I)+2*K2_VZ(I)+2*K3_VZ(I)+K4_VZ(I))/6
+         VX(I)=VXold(I)+DT*(K1_VX(I)+2*K2_VX(I)+2*K3_VX(I)+K4_VX(I))/6
+         VY(I)=VYold(I)+DT*(K1_VY(I)+2*K2_VY(I)+2*K3_VY(I)+K4_VY(I))/6
+         VZ(I)=VZold(I)+DT*(K1_VZ(I)+2*K2_VZ(I)+2*K3_VZ(I)+K4_VZ(I))/6
 
+         A(I)=AOLD(I)+DT*(A1(I)+2*A2(I)+2*A3(I)+A4(I))/6
       END DO
 C     If binary relaxation problem, adjust center of mass positions:                                                                                          
       IF (NRELAX.GE.1) CALL CMADJ
