@@ -27,7 +27,7 @@ c     Called by INIT, MAINIT
       REAL dtmin,ci2,dtivel,ai,dtiacc,dti
 
       DTIVEL=0.
-      DTMIN=1500000.
+      DTMIN=1500000
       DO I=1,N
          IF (NN(I).NE.0) THEN
 c     calculate sound-crossing time over a smoothing length, including AV
