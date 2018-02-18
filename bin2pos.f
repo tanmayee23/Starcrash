@@ -34,18 +34,29 @@ c     an ASCII input file named pos.sph
          stop
       endif
       OPEN(12,FILE=filename,FORM='UNFORMATTED')
-      OPEN(14,FILE='pos.sph', status='unknown')
+      OPEN(14,FILE='pos.sph', form='formatted')
 C    (The following READ sequence must match exactly the WRITE sequence
 C     used in subroutine DUMP)
-      READ(12) N,nnopt,hmin,hmax,gam,dum,
-     $           dum,dum,ndum,ndum,ndum,dum,Ndum,dum,dum,dum,
-     $           Ndum,dum,dum,dum,dum,dum,dum,
-     $           Ndum,TRELAX
-      write(14,'(2i6,4e15.7)')n,nnopt,hmin,hmax,gam,trelax
+!      READ(12) N,nnopt,hmin,hmax,gam,dum,
+!     $           dum,dum,ndum,ndum,ndum,dum,Ndum,dum,dum,dum,
+!     $           Ndum,dum,dum,dum,dum,dum,dum,
+!     $           Ndum,TRELAX
+      Read(12) N,NNOPT,HMIN,HMAX,GAM,SEP0,
+     $     TF,DTOUT,NOUT,NLEFT,NIT,T,NAV,ALPHA,BETA,ETA2,
+     $     NGR,XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,ZGRMAX,
+     $     XGRLIM,YGRLIM,ZGRLIM,NRELAX,TRELAX,initgr,
+     $     ngravrad,sol,ntimestepper,q2xx,q2xy,q2xz,q2yy,q2yz,q2zz
+
+      write(6,*)'n=:',n
+
+      write(14,*),N,nnopt,hmin,hmax,gam,trelax
+      !write(14,'(2i6,4e15.7)')n,nnopt,hmin,hmax,gam,trelax
       DO I=1,N
-         READ (12) X,Y,z,am,hp,rho,dum,dum,dum,dum,dum,dum,a
-         write(14,'(7e15.7)') X,Y,z,am,hp,rho,a
+         READ (12) X,Y,z,am,hp,rho,vx,vy,vz,vxdot,vydot,vzdot,a
+         write(14,'(13e15.7)') X,Y,z,am,hp,rho,vx,vy,vz,vxdot,vydot,
+     $        vzdot,a
       ENDDO
+
       READ (12) NCHK
       CLOSE (12)
       IF (NCHK.NE.N) STOP 'INIT: PROBLEM WITH DUMP FILE ???'

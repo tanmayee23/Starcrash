@@ -1,4 +1,7 @@
 **************************************************************
+
+
+
 c     This file is part of the StarCrash code
 c     Version 1.0
 c
@@ -100,6 +103,8 @@ C     a 3-letter code):
             CALL setuphyp1
          else if (iname.eq.'hyq') THEN
             CALL setuphypq
+         else if (iname.eq.'sti') THEN
+            CALL shock_tube 
          ELSE
             STOP 'INIT: UNKNOWN INAME ???'
          ENDIF
@@ -170,14 +175,18 @@ C Advance velocities to half-timestep:
       CALL TSTEP
          DTH=0.5*DT
          if(myrank.eq.0) write(6,*)'Initial dth=',dth
+         if(ntimestepper.eq.0)then
          DO I=1,N
             VX(I)=VX(I)+VXDOT(I)*DTH
             VY(I)=VY(I)+VYDOT(I)*DTH
             VZ(I)=VZ(I)+VZDOT(I)*DTH
          ENDDO
+         end if
          if(myrank.eq.0) write(6,*) 'LFSTART: closing'
       RETURN
       END
+
+
 
 
 

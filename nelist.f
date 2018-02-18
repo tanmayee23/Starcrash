@@ -21,7 +21,7 @@ c     Called by ADVANCE,INIT,LFSTART,OPTHP2
 C Select a maximum size for the grid:
       INTEGER ncmx,ncmy,ncmz
 C      PARAMETER (NCMX=128,NCMY=128,NCMZ=128)
-      PARAMETER (NCMX=256,NCMY=256,NCMZ=256)
+      PARAMETER (NCMX=512,NCMY=64,NCMZ=64)
 
 C Linked-List and Head-Of-Cell arrays (cf. Hockney and Eastwood):
       INTEGER*4 HOC,LL(NMAX)

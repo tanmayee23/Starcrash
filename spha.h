@@ -10,10 +10,11 @@ c     http://www.gnu.org/licenses/gpl.html for more details.
 
 C     NUMBER OF PROCESSORS
       INTEGER NPROCS
-      PARAMETER (NPROCS=4)
+      PARAMETER (NPROCS=2)
 c     Particle Parameters
       INTEGER NMAX,NMAXP,NNMAX
-      PARAMETER (NMAX=100000,NMAXP=(NMAX-1)/NPROCS+1,NNMAX=200)
+      PARAMETER (NMAX=110000,NMAXP=(NMAX-1)/NPROCS+1,NNMAX=200)
+      INTEGER NREF(NMAX)
 c     Interpolation Parameters for kernel summation
       INTEGER NTAB
       PARAMETER (NTAB=100000)                                           
@@ -24,6 +25,8 @@ c     Gravity grid parameters
       INTEGER NGRAV,NNGRAV,N1GRAV,NNP
       PARAMETER (NGRAV=64,NNGRAV=NGRAV*2)
       PARAMETER (N1GRAV=NGRAV+1,NNP=NNGRAV/NPROCS)
+
+
 
 c     ARTVIS: artificial viscosity quantities
       INTEGER NAV
@@ -89,3 +92,5 @@ C     gravrad: quantities for computing gravitational radiation losses
      $      NGR,XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,
      $      ZGRMAX,XGRLIM,YGRLIM,ZGRLIM,HMIN,HMAX,NRELAX,TRELAX,SEP0,
      $      QDAR,AMNS,RNS,RP,VPEAK,TRELOFF,NGRAVRAD,SOL,NTIMESTEPPER
+
+

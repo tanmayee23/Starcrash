@@ -121,7 +121,7 @@ C     "Scatter" part of the sum (i-j pair contributes to adot_j):
 c     Use MPI_ALLREDUCE to sum subtotals, and redistribute back to processes
       
       CALL MPI_ALLREDUCE(myadot,adot,n,MPI_REAL,MPI_SUM,
-     $     MPI_COMM_WORLD,ierr)
+     $     MPI_COMM_WORLD,i)
 
       RETURN
       END
@@ -288,3 +288,4 @@ C If this is a relaxation calculation, add centrifugal and drag forces:
 
       RETURN
       END
+      

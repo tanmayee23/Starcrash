@@ -1,0 +1,8 @@
+  &SHOCKINPUT
+ vx_l=  1.0,
+ vx_r=  0.0,
+ press_l=  1.0,
+ press_r=  0.1,
+ rho_l=  1.0,
+ rho_r=  0.125,
+&END

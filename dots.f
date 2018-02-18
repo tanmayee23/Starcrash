@@ -19,7 +19,7 @@ c     Calls BALADOTS,CLAADOTS,NEWADOTS
       INCLUDE 'spha.h'
 C     write (6,*) 'ADOTS: starting'
       IF(nrelax.eq.0) then
-         IF (NAV.EQ.1) THEN
+         IF (NAV.EQ.0.or.NAV.EQ.1) THEN
             CALL BALADOTS
          ELSE IF (NAV.EQ.2) THEN
             CALL CLAADOTS

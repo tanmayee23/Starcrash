@@ -23,7 +23,7 @@ c     Calls DUMP
       IF (MOD(NIT,NITCH).EQ.0) THEN
          WRITE (6,*) 
      $        'CHECKPT: writing local checkpt file at NIT=',NIT
-         OPEN(12,FILE='restart.sph',FORM='UNFORMATTED')
+         OPEN(12,FILE='restart.sph',FORM='FORMATTED')
          CALL DUMP(12)
          CLOSE (12)
       ENDIF
@@ -46,18 +46,19 @@ c     Called by CHECKPT,DUOUT
 
       INTEGER iu,i
 
-      WRITE (IU) N,NNOPT,HMIN,HMAX,GAM,SEP0,
-     $     TF,DTOUT,NOUT,NLEFT,NIT,T,NAV,ALPHA,BETA,ETA2,
-     $     NGR,XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,ZGRMAX,
-     $     XGRLIM,YGRLIM,ZGRLIM,NRELAX,TRELAX,initgr,
-     $     ngravrad,sol,q2xx,q2xy,q2xz,q2yy,q2yz,q2zz
+!      WRITE (IU,'(2i8,6e15.7,3i6,e15.7,i6,3e15.7)') 
+!     $     N,NNOPT,HMIN,HMAX,GAM,SEP0,
+!     $     TF,DTOUT,NOUT,NLEFT,NIT,T,NAV,ALPHA,BETA,ETA2
+c     $     NGR,XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,ZGRMAX,
+c     $     XGRLIM,YGRLIM,ZGRLIM,NRELAX,TRELAX,initgr,
+c     $     ngravrad,sol,ntimestepper,q2xx,q2xy,q2xz,q2yy,q2yz,q2zz
       DO I=1,N
-       WRITE (IU) 
+       WRITE (IU,'(21e15.7)') 
      $       X(I),Y(I),Z(I),AM(I),HP(I),RHO(I),VX(I),VY(I),VZ(I),
      $       VXDOT(I),VYDOT(I),VZDOT(I),A(I),ADOT(I),
      $       GX(I),GY(I),GZ(I),GRPOT(I),ux(i),uy(i),uz(i)
       ENDDO
-      WRITE (IU) N,nleft
+     ! WRITE (IU,'(2i8)') N,nleft
 C     (to check that file was not corrupted)
 
       RETURN
@@ -87,8 +88,8 @@ C     Synchronize velocities with positions:
 C     Output at every iteration:
       CALL ENOUT
       if(nrelax.eq.0)then
-         call biout		
-         call gwout	
+C         call biout		
+C         call gwout	
 c         call densplot 
       endif
       
@@ -449,7 +450,7 @@ C 101  FORMAT('/sptmp/trace/out',
 
       WRITE (6,*) 'DUOUT: writing file ',OUTFN,'at t=',T
             
-      OPEN(13,FILE=OUTFN,form='unformatted')
+      OPEN(13,FILE=OUTFN,form='formatted')
       CALL DUMP(13)
       CLOSE (13)
       

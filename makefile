@@ -1,7 +1,7 @@
 #! /usr/sbin/smake
 #
 MPID	  = /usr/mpi/qlogic/include
-FFTDIR    = /home/tanmayeegupte/Starcrash/fftw-2.1.5
+FFTDIR    = /home/tanmayeegupte/code/fftw-2.1.5
 SFFTDIR   = $(FFTDIR)/../../lib
 RFFTDIR   = $(FFTDIR)/rfftw
 MPIDIR    = $(FFTDIR)/mpi
@@ -38,7 +38,7 @@ FOBJS     = advance.o balAV.o calcdivv.o claAV.o densplot.o \
                 doqgrav.o dots.o getcurlv.o grav.o grav2.o gravrad.o \
                 init.o kernels.o main.o nelist.o newAV.o output.o \
                 poly.o ran1.o setup1ns.o setup2ns.o setup2q.o setupirr.o \
-		setuphyper.o
+		setuphyper.o shock_tube_init.o
 
 COBJS     = fftw_f77.o
 FFTOBJS   = $(MPIDIR)/fftwnd_mpi.o $(TMPIDIR)/transpose_mpi.o \

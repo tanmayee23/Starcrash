@@ -1,3 +1,4 @@
+
 **************************************************************
 c     This file is part of the StarCrash code
 c     Version 1.0
@@ -822,3 +823,265 @@ C     and our code's "u" is written as "v"
       T=T+DT
       RETURN
       END
+!----------------------------------------------------------------------------------!
+****************************************************************
+      SUBROUTINE ADVANCE_SHOCK
+      IMPLICIT NONE
+*****************************************************************                                                                
+c     Release 1.0                                                                                                                                         c     Advance hydro quantities by a timestep, using second order Runge Kutta method                                                                  
+c     Called by MAINIT                                                                                                                                       
+c     Calls NENE,RHOS,ADOTS,CMADJ,VDOTS                                                                                                                      
+***************************************************************                                                                                         
+      INCLUDE 'shock.h'
+      INCLUDE 'spha.h'
+      !OPEN(124,FILE='splash_ghost.txt')
+
+      REAL UTINY
+      PARAMETER (UTINY=1.E-10)
+
+      REAL AO(NMAX), K1_X(NMAX),K1_Y(NMAX),K1_Z(NMAX)
+      REAL DTH,K2_X(NMAX),K2_Y(NMAX),K2_Z(NMAX)
+      REAL K1_VX(NMAX),K1_VY(NMAX),K1_VZ(NMAX)
+      REAL K2_VX(NMAX),K2_VY(NMAX),K2_VZ(NMAX)
+      REAL K3_X(NMAX),K3_Y(NMAX),K3_Z(NMAX)
+      REAL K3_VX(NMAX),K3_VY(NMAX),K3_VZ(NMAX)
+      REAL K4_X(NMAX),K4_Y(NMAX),K4_Z(NMAX)
+      REAL K4_VX(NMAX),K4_VY(NMAX),K4_VZ(NMAX)
+      REAL Xold(NMAX),Yold(NMAX),Zold(NMAX)
+      REAL VXold(NMAX),VYold(NMAX),VZold(NMAX)
+      REAL AOLD(NMAX),A1(NMAX),A2(NMAX)
+      REAL A3(NMAX),A4(NMAX)
+      INTEGER I,J,k
+
+      OPEN(124,FILE='splash_ghost.txt')
+      
+c     Number of particles in y and z directions 
+      nwidth = 10
+c     Number of particles in x direction 
+      nx = 100
+c     Number of real particles
+      np = nx*nwidth*nwidth
+c     Number of sets of ghost particles                                                                                                                  
+      nghost = 8
+c     Number of particles+ghost particles 
+      ntube=(nghost+1)*np
+c     Number of particles on one end                                                                                                                        
+      nend = 9*nwidth*nwidth*nwidth
+c     Total number of particles                                                                                                                              
+      ntot = ntube+2*nend
+      ntimestepper = -1
+      space=1.0/(nx)
+
+D     TH=0.5*DT
+      CALL NENE
+      CALL RHOS
+      CALL VDOTS
+
+      IF (NAV.GE.1.and.nrelax.eq.0) THEN
+
+         CALL ADOTS
+
+      ENDIF 
+ 
+      DO I=1,ntot
+            Xold(I)=X(I)
+            Yold(I)=Y(I)
+            Zold(I)=Z(I)
+
+            VXold(I)=VX(I)
+            VYold(I)=VY(I)
+            VZold(I)=VZ(I)
+ 
+           Aold(I)=A(I) 
+ !          write(124,*),t,I,vxold(I)
+      END do
+      
+      DO I=1,np
+            K1_X(I)=VX(I)
+            K1_Y(I)=VY(I)
+            K1_Z(I)=VZ(I)
+
+            K1_VX(I)=VXDOT(I)
+            K1_VY(I)=VYDOT(I)
+            K1_VZ(I)=VZDOT(I)
+
+            A1(I)=ADOT(I)
+
+
+            END DO
+
+      DO I=1,np
+
+            X(I)=XOLD(I)+DTH*K1_X(I)
+            Y(I)=YOLD(I)+DTH*K1_Y(I)
+            Z(I)=ZOLD(I)+DTH*K1_Z(I)
+
+            VX(I)=VXOLD(I)+DTH*K1_VX(I)
+            VY(I)=VYOLD(I)+DTH*K1_VY(I)
+            VZ(I)=VZOLD(I)+DTH*K1_VZ(I)
+
+            A(I)=AOLD(I)+DTH*A1(I)
+      END DO
+       
+      CALL NENE
+      CALL RHOS
+      CALL VDOTS
+      CALL ADOTS
+       
+      DO I=1,np
+         K2_X(I)=VX(I)
+         K2_Y(I)=VY(I)
+         K2_Z(I)=VZ(I)
+
+         K2_VX(I)=VXDOT(I)
+         K2_VY(I)=VYDOT(I)
+         K2_VZ(I)=VZDOT(I)
+         
+         A2(I)=ADOT(I)
+      END DO
+
+      DO I=1,np
+          
+          X(I)=Xold(I)+K2_X(I)*DTH
+          Y(I)=Yold(I)+K2_Y(I)*DTH
+          Z(I)=Zold(I)+K2_Z(I)*DTH
+          
+          VX(I)=VXOLD(I)+K2_VX(I)*DTH
+          VY(I)=VYOLD(I)+K2_VY(I)*DTH
+          VZ(I)=VZOLD(I)+K2_VZ(I)*DTH
+
+          A(I)=AOLD(I)+A2(I)*DTH
+      END DO
+
+      CALL NENE
+      CALL RHOS
+      CALL VDOTS
+      CALL ADOTS
+
+      DO I=1,np
+
+         K3_X(I)=VX(I)
+         K3_Y(I)=VY(I)
+         K3_Z(I)=VZ(I)
+
+
+         K3_VX(I)=VXDOT(I)
+         K3_VY(I)=VYDOT(I)
+         K3_VZ(I)=VZDOT(I)
+
+         A3(I)=ADOT(I)
+      
+      END DO
+
+      DO I=1,np
+
+          X(I)=Xold(I)+K3_X(I)*DT
+          Y(I)=Yold(I)+K3_Y(I)*DT
+          Z(I)=Zold(I)+K3_Z(I)*DT
+
+          VX(I)=VXOLD(I)+K3_VX(I)*DT
+          VY(I)=VYOLD(I)+K3_VY(I)*DT
+          VZ(I)=VZOLD(I)+K3_VZ(I)*DT
+
+          A(I)=AOLD(I)+A3(I)*DT
+
+      END DO
+
+      CALL NENE
+      CALL RHOS
+      CALL VDOTS
+      CALL ADOTS
+      
+      DO I=1,np
+
+         K4_X(I)=VX(I)
+         K4_Y(I)=VY(I)
+         K4_Z(I)=VZ(I)
+
+
+         K4_VX(I)=VXDOT(I)
+         K4_VY(I)=VYDOT(I)
+         K4_VZ(I)=VZDOT(I)
+
+         A4(I)=ADOT(I)
+      END DO
+
+!       FINAL POSITIONS and VELOCITIES
+      DO I=1,ntot
+      
+         if(I.le.np)then
+         X(I)=Xold(I)+DT*(K1_X(I)+2*K2_X(I)+2*K3_X(I)+K4_X(I))/6
+         Y(I)=Yold(I)
+         Z(I)=ZolD(I)
+
+         VX(I)=VXold(I)+DT*(K1_VX(I)+2*K2_VX(I)+2*K3_VX(I)+K4_VX(I))/6
+         VY(I)=0
+         VZ(I)=0
+
+         A(I)=AOLD(I)+DT*(A1(I)+2*A2(I)+2*A3(I)+A4(I))/6
+    
+      end if
+
+         if(I.gt.ntube)then
+
+         X(I)=Xold(I)
+         Y(I)=Yold(I)       
+         Z(I)=ZolD(I)   
+
+         VX(I)=VXold(I)
+         VY(I)=0
+         VZ(I)=0 
+
+         A(I)=AOLD(I)
+!         write(124,*),I,t,y(I),vy(I),z(I),vz(I)
+      end if
+      END DO
+
+      DO i=np+1,ntube
+            X(I)=x(nref(i))
+            VX(i)=VX(nref(i))
+            y(i)=yold(i)
+            z(i)=zold(i)
+            VY(i)=0
+            VZ(i)=0
+            A(i)=A(nref(i))
+         ENDDO
+      ENDDO
+
+
+C     If binary relaxation problem, adjust center of mass positions:                                                                                          
+      IF (NRELAX.GE.1) CALL CMADJ
+
+      do i=1,n
+         if(initgr.eq.3) then
+c     this is taken from Blanchet, Damour, and Schaefer                                                                                                    
+c     MNRAS 242, 289 (1990), Eq. (5.16),  with beta=A_i=0 in the Newtonian                                                                                 
+C     limit. Note that our code's "v" is written there as "w",                                                                                              
+C     and our code's "u" is written as "v"                                                                                                                   
+            ux(i)=vx(i)+0.8/sol**5*
+     $           (q3xx*vx(i)+q3xy*vy(i)+q3xz*vz(i))
+            uy(i)=vy(i)+0.8/sol**5*
+     $           (q3xy*vx(i)+q3yy*vy(i)+q3yz*vz(i))
+            uz(i)=vz(i)+0.8/sol**5*
+     $           (q3xz*vx(i)+q3yz*vy(i)+q3zz*vz(i))
+         else
+            ux(i)=vx(i)
+            uy(i)=vy(i)
+            uz(i)=vz(i)
+         endif
+      enddo
+      
+      T=T+DT
+      RETURN
+      END          
+
+
+
+
+
+
+
+
+
+
+
