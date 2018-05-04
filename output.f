@@ -42,6 +42,7 @@ c     Writes Checkpoint file restart.sph every NITCH iterations using DUMP
 c     The format must match that found in subroutine INIT!
 c     Called by CHECKPT,DUOUT
 ************************************************** 
+      INCLUDE 'shock.h'
       INCLUDE 'spha.h'                                          
 
       INTEGER iu,i
@@ -51,12 +52,19 @@ c     Called by CHECKPT,DUOUT
 !     $     TF,DTOUT,NOUT,NLEFT,NIT,T,NAV,ALPHA,BETA,ETA2
 c     $     NGR,XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,ZGRMAX,
 c     $     XGRLIM,YGRLIM,ZGRLIM,NRELAX,TRELAX,initgr,
-c     $     ngravrad,sol,ntimestepper,q2xx,q2xy,q2xz,q2yy,q2yz,q2zz
-      DO I=1,N
-       WRITE (IU,'(21e15.7)') 
-     $       X(I),Y(I),Z(I),AM(I),HP(I),RHO(I),VX(I),VY(I),VZ(I),
-     $       VXDOT(I),VYDOT(I),VZDOT(I),A(I),ADOT(I),
-     $       GX(I),GY(I),GZ(I),GRPOT(I),ux(i),uy(i),uz(i)
+c     $     ngravrad,sol,ntimestepper,nenergy,
+C     $     q2xx,q2xy,q2xz,q2yy,q2yz,q2zz
+c     Number of particles in y and z directions
+      nwidth = 100 !2*nnopt
+c     Number of particles in x direction
+      np = 1000
+c     Number of real particles
+      ntot =np+2*nwidth
+      DO I=1,ntot
+         WRITE (IU,'(22e15.7)') 
+     $        X(I),Y(I),Z(I),AM(I),HP(I),RHO(I),VX(I),VY(I),VZ(I),
+     $        VXDOT(I),VYDOT(I),VZDOT(I),A(I),ADOT(I),
+     $        GX(I),GY(I),GZ(I),GRPOT(I),ux(i),uy(i),uz(i),EN(I)
       ENDDO
 C     (to check that file was not corrupted)
 

@@ -64,7 +64,7 @@ C     used in subroutine DUMP)
          DO I=1,N
             READ (12) X(I),Y(I),Z(I),AM(I),HP(I),RHO(I),VX(I),VY(I),
      $           VZ(I),VXDOT(I),VYDOT(I),VZDOT(I),A(I),ADOT(I),
-     $           GX(I),GY(I),GZ(I),GRPOT(I),ux(i),uy(i),uz(i)
+     $           GX(I),GY(I),GZ(I),GRPOT(I),ux(i),uy(i),uz(i),EN(I)
          ENDDO
          READ (12) NCHK,nleft
          CLOSE (12)

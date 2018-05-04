@@ -13,19 +13,20 @@ C     NUMBER OF PROCESSORS
       PARAMETER (NPROCS=2)
 c     Particle Parameters
       INTEGER NMAX,NMAXP,NNMAX
-      PARAMETER (NMAX=110000,NMAXP=(NMAX-1)/NPROCS+1,NNMAX=200)
+      PARAMETER (NMAX=210000,NMAXP=(NMAX-1)/NPROCS+1,NNMAX=200)
 c     Interpolation Parameters for kernel summation
       INTEGER NTAB
       PARAMETER (NTAB=100000)                                           
 c     Real constants
       REAL CN,PI
-      PARAMETER (CN=0.6,PI=3.14159265359)
+      PARAMETER (CN=0.15,PI=3.14159265359)
 c     Gravity grid parameters
       INTEGER NGRAV,NNGRAV,N1GRAV,NNP
       PARAMETER (NGRAV=64,NNGRAV=NGRAV*2)
       PARAMETER (N1GRAV=NGRAV+1,NNP=NNGRAV/NPROCS)
-
-
+c     Energy evolution eqn. choice
+      INTEGER NENERGY
+      PARAMETER (NENERGY=2)
 
 c     ARTVIS: artificial viscosity quantities
       INTEGER NAV
@@ -51,10 +52,13 @@ c     WTABUL: tabulated kernel functions
       REAL WTAB(NTAB),DWTAB(NTAB),CTAB
 c     PART: particle-based quantities
       REAL X(NMAX),Y(NMAX),Z(NMAX),VX(NMAX),VY(NMAX),VZ(NMAX),
-     $   AM(NMAX),HP(NMAX),A(NMAX),RHO(NMAX),POR2(NMAX),GRPOT(NMAX)
+     $     AM(NMAX),HP(NMAX),A(NMAX),RHO(NMAX),POR2(NMAX),GRPOT(NMAX),
+     $     EN(NMAX),U(NMAX)
+      INTEGER NREF(NMAX)
 c     DYN: dynamical quantities 
       REAL VXDOT(NMAX),VYDOT(NMAX),VZDOT(NMAX),ADOT(NMAX),
-     $      GX(NMAX),GY(NMAX),GZ(NMAX),ux(NMAX),uy(NMAX),uz(NMAX)
+     $      GX(NMAX),GY(NMAX),GZ(NMAX),ux(NMAX),uy(NMAX),uz(NMAX),
+     $      ENDOT(NMAX),UDOT(NMAX)
 C     NEIGH: Neighbor list quantities 
       REAL XIJ(NNMAX,NMAXP),YIJ(NNMAX,NMAXP),ZIJ(NNMAX,NMAXP)
       INTEGER NNI(NNMAX,NMAXP),NN(NMAX)
@@ -78,8 +82,8 @@ C     gravrad: quantities for computing gravitational radiation losses
       COMMON/INTPAR/ GAM,N,NNOPT,NTIMESTEPPER,HMIN,HMAX
       COMMON/OUTP/ DT,T,VXS,VYS,VZS,TF,DTOUT,NOUT,NIT,xm2,ym2,zm2     
       COMMON/WTABUL/ WTAB,DWTAB,CTAB                        
-      COMMON/PART/X,Y,Z,VX,VY,VZ,AM,HP,A,RHO,POR2,GRPOT  
-      COMMON/DYN/ VXDOT,VYDOT,VZDOT,ADOT,GX,GY,GZ,ux,uy,uz
+      COMMON/PART/X,Y,Z,VX,VY,VZ,AM,HP,A,RHO,POR2,GRPOT,EN,NREF,U  
+      COMMON/DYN/ VXDOT,VYDOT,VZDOT,ADOT,GX,GY,GZ,ux,uy,uz,EnDOT,UDOT
       COMMON/NEIGH/ XIJ,YIJ,ZIJ,NNI,NN
       COMMON/PARALLEL/ myrank,n_lower,n_upper,kstart,koffset
       COMMON/q3/ q3xx,q3xy,q3xz,q3yy,q3yz,q3zz
@@ -91,5 +95,4 @@ C     gravrad: quantities for computing gravitational radiation losses
      $      NGR,XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,
      $      ZGRMAX,XGRLIM,YGRLIM,ZGRLIM,HMIN,HMAX,NRELAX,TRELAX,SEP0,
      $      QDAR,AMNS,RNS,RP,VPEAK,TRELOFF,NGRAVRAD,SOL,NTIMESTEPPER
-
-
+cccccccc     $      NENERGY

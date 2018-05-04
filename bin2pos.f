@@ -45,7 +45,8 @@ C     used in subroutine DUMP)
      $     TF,DTOUT,NOUT,NLEFT,NIT,T,NAV,ALPHA,BETA,ETA2,
      $     NGR,XGRMIN,XGRMAX,YGRMIN,YGRMAX,ZGRMIN,ZGRMAX,
      $     XGRLIM,YGRLIM,ZGRLIM,NRELAX,TRELAX,initgr,
-     $     ngravrad,sol,ntimestepper,q2xx,q2xy,q2xz,q2yy,q2yz,q2zz
+     $     ngravrad,sol,ntimestepper,nenergy,q2xx,q2xy,q2xz,q2yy,q2yz,
+     $     q2zz
 
       write(6,*)'n=:',n
 

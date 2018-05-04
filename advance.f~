@@ -25,7 +25,7 @@ c     Called by INIT, MAINIT
       PARAMETER (TINY=1.E-10)
 
       INTEGER i
-      REAL dtmin,ci2,dtivel,ai,dtiacc,dti
+      REAL dtmin,ci2,dtivel,ai,dtiacc,dti,dten
 
       DTIVEL=0.
       DTMIN=1500000.
@@ -47,6 +47,8 @@ c     calculate timescale on which velocity changes
             DTIACC=SQRT(HP(I)/(AI+TINY))
             DTI=MIN(DTIVEL,DTIACC)
             DTMIN=MIN(DTMIN,DTI)
+c            dten = en(i)/(abs(endot(i))+TINY)
+cy            dtmin = min(dtmin,dten)
          ENDIF
       ENDDO
       DT=CN*DTMIN
@@ -376,7 +378,7 @@ C     "Gather" part of the sum (i-j pair contributes to rho_i):
           J=NNI(IN,II)
           R2=XIJ(IN,II)**2.+YIJ(IN,II)**2.+ZIJ(IN,II)**2.
           ITAB=INT(CTAB*R2/H2)+1
-          WIJINI=WTAB(ITAB)/H3
+          WIJINI=WTAB(ITAB)*2*PI/3.0/HPI!WTAB(ITAB)/H3
           RHOI=RHOI+AM(J)*WIJINI
         ENDDO
         MYRHO(I)=MYRHO(I)+0.5*RHOI
@@ -385,7 +387,85 @@ C     "Scatter" part of the sum (i-j pair contributes to rho_j):
            J=NNI(IN,II)
            R2=XIJ(IN,II)**2.+YIJ(IN,II)**2.+ZIJ(IN,II)**2.
            ITAB=INT(CTAB*R2/H2)+1
-           WIJINI=WTAB(ITAB)/H3
+           WIJINI=WTAB(ITAB)*2*PI/3.0/HPI!WTAB(ITAB)/H3
+           MYRHO(J)=MYRHO(J)+0.5*AMI*WIJINI
+        ENDDO
+      ENDDO
+
+c     We have the density subtotals, calculated from i=n_lower to n_upper
+c     Now, we sum them all, and distribute the result to all processes
+      CALL MPI_ALLREDUCE(myrho,rho,n,MPI_REAL,MPI_SUM,
+     $     MPI_COMM_WORLD,ierr)
+
+C Do something crude for particles with NN(I)=0 (to avoid
+C having RHO(I)=0):
+      DO I=1,n
+         if(rho(i).le.0)write(6,*)'rhos: Nonpositive rho:',i,rho(i)
+
+
+         RHO(I)=MAX(RHO(I), RHOTINY )
+      ENDDO
+
+C Calculate p/rho**2 for all particles:
+      DO I=1,N
+         if(a(i).le.0)write(6,*)'rhos: Nonpositive a:',i,a(i)
+
+         POR2(I)=A(I)*RHO(I)**(GAM-2.)
+      ENDDO
+
+      RETURN
+      END
+************************************************************************
+      SUBROUTINE RHOS_1
+************************************************************
+c     Release 1.0
+c     Calculate SPH density at each particle position
+c     Called by ADVANCE
+***************************************************************
+
+      IMPLICIT NONE
+
+C Compute densities and P/rho^2:
+      INCLUDE 'spha.h'                                         
+      INCLUDE 'mpif.h'
+
+      REAL rhotiny
+      PARAMETER (RHOTINY=1.E-10)
+      real myrho(n)
+
+      REAL ami,hpi,h2,h3,rhoi,r2,wijini
+      INTEGER i,ii,in,j,itab,ierr
+
+C Initialize:
+      DO I=1,N
+        MYRHO(I)=0.
+        rho(i)=0.
+      ENDDO
+
+C  For each particle:
+      DO I=n_lower,n_upper
+        II=I-n_lower+1
+        AMI=AM(I)
+        HPI=HP(I)
+        H2=HPI**2
+        H3=HPI*H2
+C     Accumulate contributions:
+C     "Gather" part of the sum (i-j pair contributes to rho_i):
+        RHOI=0.
+        DO IN=1,NN(I)
+          J=NNI(IN,II)
+          R2=XIJ(IN,II)**2.+YIJ(IN,II)**2.+ZIJ(IN,II)**2.
+          ITAB=INT(CTAB*R2/H2)+1
+          WIJINI=WTAB(ITAB)*2*PI/3.0/HPI !WTAB(ITAB)/H3
+          RHOI=RHOI+AM(J)*WIJINI
+        ENDDO
+        MYRHO(I)=MYRHO(I)+0.5*RHOI
+C     "Scatter" part of the sum (i-j pair contributes to rho_j):
+        DO IN=1,NN(I)
+           J=NNI(IN,II)
+           R2=XIJ(IN,II)**2.+YIJ(IN,II)**2.+ZIJ(IN,II)**2.
+           ITAB=INT(CTAB*R2/H2)+1
+           WIJINI=WTAB(ITAB)*2*PI/3.0/HPI ! WTAB(ITAB)/H3
            MYRHO(J)=MYRHO(J)+0.5*AMI*WIJINI
         ENDDO
       ENDDO
@@ -408,6 +488,7 @@ C Calculate p/rho**2 for all particles:
 
       RETURN
       END
+
 ************************************************************************
       SUBROUTINE ADVANCE_EULER
       IMPLICIT NONE
@@ -825,7 +906,7 @@ C     and our code's "u" is written as "v"
       END
 !----------------------------------------------------------------------------------!
 ****************************************************************
-      SUBROUTINE ADVANCE_SHOCK
+      SUBROUTINE ADVANCE_SHOCK_NEW
       IMPLICIT NONE
 *****************************************************************                                                                
 c     Release 1.0                                                                                                                                         c     Advance hydro quantities by a timestep, using second order Runge Kutta method                                                                  
@@ -834,12 +915,13 @@ c     Calls NENE,RHOS,ADOTS,CMADJ,VDOTS
 ***************************************************************                                                                                         
       INCLUDE 'shock.h'
       INCLUDE 'spha.h'
-      !OPEN(124,FILE='splash_ghost.txt')
-
+!      INCLUDE 'sph.input'
+!      OPEN(124,FILE='splash_ghost.txt')
+      
       REAL UTINY
       PARAMETER (UTINY=1.E-10)
 
-      REAL AO(NMAX), K1_X(NMAX),K1_Y(NMAX),K1_Z(NMAX)
+      REAL K1_X(NNMAX),K1_Y(NMAX),K1_Z(NMAX)
       REAL DTH,K2_X(NMAX),K2_Y(NMAX),K2_Z(NMAX)
       REAL K1_VX(NMAX),K1_VY(NMAX),K1_VZ(NMAX)
       REAL K2_VX(NMAX),K2_VY(NMAX),K2_VZ(NMAX)
@@ -850,40 +932,52 @@ c     Calls NENE,RHOS,ADOTS,CMADJ,VDOTS
       REAL Xold(NMAX),Yold(NMAX),Zold(NMAX)
       REAL VXold(NMAX),VYold(NMAX),VZold(NMAX)
       REAL AOLD(NMAX),A1(NMAX),A2(NMAX)
-      REAL A3(NMAX),A4(NMAX)
+      REAL A3(NMAX),A4(NMAX),ENold(NMAX),u1
+      REAL EN1(NMAX),EN2(NMAX),EN3(NMAX),EN4(NMAX)
       INTEGER I,J,k
 
       OPEN(124,FILE='splash_ghost.txt')
-      
+ !     OPEN(12,FILE='sph.input')
+ !     READ(12,INPUT)
+ !     CLOSE(12)
+
+
 c     Number of particles in y and z directions 
-      nwidth = 10
+      nwidth = 100 !2*nnopt
 c     Number of particles in x direction 
-      nx = 100
+      nx = 1000
 c     Number of real particles
-      np = nx*nwidth*nwidth
-c     Number of sets of ghost particles                                                                                                                  
-      nghost = 8
+      np = nx
 c     Number of particles+ghost particles 
-      ntube=(nghost+1)*np
+      ntube=np
 c     Number of particles on one end                                                                                                                        
-      nend = 9*nwidth*nwidth*nwidth
+      nend = nwidth
 c     Total number of particles                                                                                                                              
-      ntot = ntube+2*nend
+      ntot = ntube+2*nwidth
       ntimestepper = -1
       space=1.0/(nx)
 
-D     TH=0.5*DT
+c      N= 10000
+c      NENERGY=  2
+ !     GAM=2.599999
+
+
+      DTH=0.5*DT
       CALL NENE
       CALL RHOS
       CALL VDOTS
-
       IF (NAV.GE.1.and.nrelax.eq.0) THEN
-
-         CALL ADOTS
-
+         
+         CALL EDOTS
+         
       ENDIF 
- 
-      DO I=1,ntot
+
+!      do i=1,np
+! 1    write(124,*),t,i          !,endot(I)
+!      end do
+
+      DO I=1,np
+c Make sure we never reference 'xold' for indices > np in advance_shock
             Xold(I)=X(I)
             Yold(I)=Y(I)
             Zold(I)=Z(I)
@@ -891,11 +985,18 @@ D     TH=0.5*DT
             VXold(I)=VX(I)
             VYold(I)=VY(I)
             VZold(I)=VZ(I)
- 
-           Aold(I)=A(I) 
- !          write(124,*),t,I,vxold(I)
-      END do
-      
+
+            if (nenergy.eq.1)then
+               Aold(I)=A(I)
+            end if
+
+!            if (nenergy.eq.2)then
+!               ENold(I)=EN(I)
+
+!            end if
+            
+         END do
+
       DO I=1,np
             K1_X(I)=VX(I)
             K1_Y(I)=VY(I)
@@ -905,28 +1006,38 @@ D     TH=0.5*DT
             K1_VY(I)=VYDOT(I)
             K1_VZ(I)=VZDOT(I)
 
-            A1(I)=ADOT(I)
+            if (nenergy.eq.1)then
+               A1(I)=ADOT(I)
+            endif
 
+!            if (nenergy.eq.2)then
+!               EN1(I)=ENDOT(I)
+!            endif
 
             END DO
 
       DO I=1,np
-
             X(I)=XOLD(I)+DTH*K1_X(I)
-            Y(I)=YOLD(I)+DTH*K1_Y(I)
-            Z(I)=ZOLD(I)+DTH*K1_Z(I)
-
             VX(I)=VXOLD(I)+DTH*K1_VX(I)
-            VY(I)=VYOLD(I)+DTH*K1_VY(I)
-            VZ(I)=VZOLD(I)+DTH*K1_VZ(I)
+            
+            if (nenergy.eq.1)then
+               A(I)=AOLD(I)+DTH*A1(I)
+               call e_from_a
+            end if
+            
+ !           if (nenergy.eq.2)then
+ !           EN(I)=ENOLD(I)+DTH*EN1(I)
+  !          if(en(i).le.0)write(6,*)'as1:bad en',i,en(i),enold(i),en1(i)
+   !         call a_from_e
+   
+ !       end if
 
-            A(I)=AOLD(I)+DTH*A1(I)
       END DO
-       
+
       CALL NENE
       CALL RHOS
       CALL VDOTS
-      CALL ADOTS
+      CALL EDOTS
        
       DO I=1,np
          K2_X(I)=VX(I)
@@ -937,26 +1048,39 @@ D     TH=0.5*DT
          K2_VY(I)=VYDOT(I)
          K2_VZ(I)=VZDOT(I)
          
-         A2(I)=ADOT(I)
+         if (nenergy.eq.1)then
+            A2(I)=ADOT(I)
+         end if
+         
+  !       if (nenergy.eq.2)then
+  !        EN2(I)=ENDOT(I)
+   !   end if
+      
       END DO
+
+    
 
       DO I=1,np
-          
           X(I)=Xold(I)+K2_X(I)*DTH
-          Y(I)=Yold(I)+K2_Y(I)*DTH
-          Z(I)=Zold(I)+K2_Z(I)*DTH
-          
           VX(I)=VXOLD(I)+K2_VX(I)*DTH
-          VY(I)=VYOLD(I)+K2_VY(I)*DTH
-          VZ(I)=VZOLD(I)+K2_VZ(I)*DTH
-
-          A(I)=AOLD(I)+A2(I)*DTH
-      END DO
+          
+          if (nenergy.eq.1)then          
+             A(I)=AOLD(I)+A2(I)*DTH
+             call e_from_a
+          end if
+          
+  !        if (nenergy.eq.2)then
+  !           EN(I)=ENOLD(I)+EN2(I)*DTH
+  !          if(en(i).le.0)write(6,*)'as2:bad en',i,en(i),enold(i),en2(i)
+ !        call a_from_e
+ !        end if 
+          
+       END DO
 
       CALL NENE
       CALL RHOS
       CALL VDOTS
-      CALL ADOTS
+      CALL EDOTS
 
       DO I=1,np
 
@@ -964,33 +1088,42 @@ D     TH=0.5*DT
          K3_Y(I)=VY(I)
          K3_Z(I)=VZ(I)
 
-
          K3_VX(I)=VXDOT(I)
          K3_VY(I)=VYDOT(I)
          K3_VZ(I)=VZDOT(I)
 
-         A3(I)=ADOT(I)
-      
+         
+         if (nenergy.eq.1)then
+            A3(I)=ADOT(I)
+         end if
+         
+  !       if (nenergy.eq.2)then
+  !          EN3(I)=ENDOT(I)
+  !       end if
       END DO
 
       DO I=1,np
-
-          X(I)=Xold(I)+K3_X(I)*DT
-          Y(I)=Yold(I)+K3_Y(I)*DT
-          Z(I)=Zold(I)+K3_Z(I)*DT
-
+         
+         X(I)=Xold(I)+K3_X(I)*DT
           VX(I)=VXOLD(I)+K3_VX(I)*DT
-          VY(I)=VYOLD(I)+K3_VY(I)*DT
-          VZ(I)=VZOLD(I)+K3_VZ(I)*DT
-
-          A(I)=AOLD(I)+A3(I)*DT
-
-      END DO
+          
+          if (nenergy.eq.1)then
+             A(I)=AOLD(I)+A3(I)*DT
+             call e_from_a
+          end if
+          
+   !       if (nenergy.eq.2)then
+   !          EN(I)=ENOLD(I)+EN3(I)*DT
+   !         if(en(i).le.0)write(6,*)'as3:bad en',i,en(i),enold(i),en3(i)
+   !          call a_from_e
+  !    end if
+       
+       END DO
 
       CALL NENE
       CALL RHOS
       CALL VDOTS
-      CALL ADOTS
+      CALL EDOTS
       
       DO I=1,np
 
@@ -1003,13 +1136,18 @@ D     TH=0.5*DT
          K4_VY(I)=VYDOT(I)
          K4_VZ(I)=VZDOT(I)
 
-         A4(I)=ADOT(I)
+         if (nenergy.eq.1)then
+            A4(I)=ADOT(I)
+         end if
+         
+   !      if (nenergy.eq.2)then
+   !         EN4(I)=ENDOT(I)
+    !     end if
       END DO
 
 !       FINAL POSITIONS and VELOCITIES
-      DO I=1,ntot
+      DO I=1,np
       
-         if(I.le.np)then
          X(I)=Xold(I)+DT*(K1_X(I)+2*K2_X(I)+2*K3_X(I)+K4_X(I))/6
          Y(I)=Yold(I)
          Z(I)=ZolD(I)
@@ -1018,35 +1156,36 @@ D     TH=0.5*DT
          VY(I)=0
          VZ(I)=0
 
-         A(I)=AOLD(I)+DT*(A1(I)+2*A2(I)+2*A3(I)+A4(I))/6
-    
-      end if
+         if (nenergy.eq.1)then
+            A(I)=AOLD(I)+DT*(A1(I)+2*A2(I)+2*A3(I)+A4(I))/6 
+!        
+            call e_From_a
+         end if
+         
+!         if (nenergy.eq.2)then
+!            EN(I)=ENOLD(I)+DT*(EN1(I)+2*EN2(I)+2*EN3(I)+EN4(I))/6
+!            if(en(i).le.0)write(6,*)'as4:bad en',i,en(i),enold(i),en4(i)
 
-         if(I.gt.ntube)then
+!            u = EN(I)-0.5*(vx(I)**2+vy(I)**2+vz(I)**2)
 
-         X(I)=Xold(I)
-         Y(I)=Yold(I)       
-         Z(I)=ZolD(I)   
+c  Move this block to SUBROUTINE a_from_e
+ !           if (u1.lt.0)then
+ !              write(6,*)"as:Bad u value!", i,u,EN(I),vx(I),vy(I),vz(I)
+  !          end if
 
-         VX(I)=VXold(I)
-         VY(I)=0
-         VZ(I)=0 
-
-         A(I)=AOLD(I)
-!         write(124,*),I,t,y(I),vy(I),z(I),vz(I)
-      end if
+   !         call a_from_e
+  !       end if
+      
       END DO
 
-      DO i=np+1,ntube
-            X(I)=x(nref(i))
-            VX(i)=VX(nref(i))
-            y(i)=yold(i)
-            z(i)=zold(i)
-            VY(i)=0
-            VZ(i)=0
-            A(i)=A(nref(i))
-         ENDDO
-      ENDDO
+      
+!      write(*,*),"Gamma",GAM
+
+      do i=ntube,ntot
+         x(i)=x(i)+dt*vx(I)
+         y(i)=y(i)
+         z(i)=z(i)
+      end do
 
 
 C     If binary relaxation problem, adjust center of mass positions:                                                                                          
@@ -1073,15 +1212,269 @@ C     and our code's "u" is written as "v"
       
       T=T+DT
       RETURN
-      END          
+      END
+
+****************************************************************
+      SUBROUTINE ADVANCE_SHOCK
+      IMPLICIT NONE
+*****************************************************************                                                                
+c     Release 1.0                                                                                                                                         c     Advance hydro quantities by a timestep, using second order Runge Kutta method                                                                  
+c     Called by MAINIT                                                                                                                                       
+c     Calls NENE,RHOS,ADOTS,CMADJ,VDOTS                                                                                                                      
+***************************************************************                                                                                         
+      INCLUDE 'shock.h'
+      INCLUDE 'spha.h'
+      !OPEN(124,FILE='splash_ghost.txt')
+
+      REAL UTINY
+      PARAMETER (UTINY=1.E-10)
+
+      REAL AO(NMAX), K1_X(NMAX),K1_Y(NMAX),K1_Z(NMAX)
+      REAL DTH,K2_X(NMAX),K2_Y(NMAX),K2_Z(NMAX)
+      REAL K1_VX(NMAX),K1_VY(NMAX),K1_VZ(NMAX)
+      REAL K2_VX(NMAX),K2_VY(NMAX),K2_VZ(NMAX)
+      REAL K3_X(NMAX),K3_Y(NMAX),K3_Z(NMAX)
+      REAL K3_VX(NMAX),K3_VY(NMAX),K3_VZ(NMAX)
+      REAL K4_X(NMAX),K4_Y(NMAX),K4_Z(NMAX)
+      REAL K4_VX(NMAX),K4_VY(NMAX),K4_VZ(NMAX)
+      REAL Xold(NMAX),Yold(NMAX),Zold(NMAX)
+      REAL VXold(NMAX),VYold(NMAX),VZold(NMAX)
+      REAL AOLD(NMAX),A1(NMAX),A2(NMAX)
+      REAL A3(NMAX),A4(NMAX),ENold(NMAX),u1
+      REAL EN1(NMAX),EN2(NMAX),EN3(NMAX),EN4(NMAX)
+      INTEGER I,J,k
+
+c     Number of particles in y and z directions                                                                                                               
+      nwidth = 100 !2*nnopt                                                                                                                                   
+c     Number of particles in x direction                                                                                                                      
+      nx = 1000
+c     Number of real particles                                                                                                                                
+      np = nx
+c     Number of particles+ghost particles                                                                                                                     
+      ntube=np
+c     Number of particles on one end                                                                                                                          
+      nend = nwidth
+c     Total number of particles                                                                                                                              
+      ntot = ntube+2*nwidth
+      ntimestepper = -1
+      space=1.0/(nx)
+
+      DTH=0.5*DT
+      CALL NENE
+      CALL RHOS
+      CALL VDOTS
+
+      IF (NAV.GE.1.and.nrelax.eq.0) THEN
+
+         CALL ADOTS
+
+      ENDIF 
+ 
+       DO I=1,np
+c Make sure we never reference 'xold' for indices > np in advance_shock                                                                                       
+            Xold(I)=X(I)
+            Yold(I)=Y(I)
+            Zold(I)=Z(I)
+
+            VXold(I)=VX(I)
+            VYold(I)=VY(I)
+            VZold(I)=VZ(I)
+
+            if (nenergy.eq.1)then
+               Aold(I)=A(I)
+            end if
+             if (nenergy.eq.2)then
+               ENold(I)=EN(I)
+            end if
+
+         END do
+
+      DO I=1,np
+            K1_X(I)=VX(I)
+            K1_Y(I)=VY(I)
+            K1_Z(I)=VZ(I)
+
+            K1_VX(I)=VXDOT(I)
+            K1_VY(I)=VYDOT(I)
+            K1_VZ(I)=VZDOT(I)
+
+            
+         END DO
+
+         do i=1,np
+            X(I)=XOLD(I)+DTH*K1_X(I)
+            VX(I)=VXOLD(I)+DTH*K1_VX(I)
+            if (nenergy.eq.1)then
+               A(I)=AOLD(I)+DTH*A1(I)
+               call e_from_a
+            end if
+            if (nenergy.eq.2)then                                                                                                                            
+               EN(I)=ENOLD(I)+DTH*EN1(I)                                                                                                                      
+               call a_from_e                                                                                                                                  
+            end if
+
+         end do
+      CALL NENE
+      CALL RHOS
+      CALL VDOTS
+      CALL EDOTS
+
+      DO I=1,np
+         K2_X(I)=VX(I)
+         K2_Y(I)=VY(I)
+         K2_Z(I)=VZ(I)
+
+         K2_VX(I)=VXDOT(I)
+         K2_VY(I)=VYDOT(I)
+         K2_VZ(I)=VZDOT(I)
+
+         if (nenergy.eq.1)then
+            A2(I)=ADOT(I)
+         end if
+
+         if (nenergy.eq.2)then                                                                                                                               
+          EN2(I)=ENDOT(I)                                                                                                                                    
+        end if                                                                                                                                                 
+
+      END DO
 
 
+      DO I=1,np
+          X(I)=Xold(I)+K2_X(I)*DTH
+          VX(I)=VXOLD(I)+K2_VX(I)*DTH
+
+          if (nenergy.eq.1)then
+             A(I)=AOLD(I)+A2(I)*DTH
+             call e_from_a
+          end if
+
+       END DO
+!-----------------------------------------------------------------!
+      CALL NENE
+      CALL RHOS
+      CALL VDOTS
+      CALL EDOTS
+
+      DO I=1,np
+
+         K3_X(I)=VX(I)
+         K3_Y(I)=VY(I)
+         K3_Z(I)=VZ(I)
+
+         K3_VX(I)=VXDOT(I)
+         K3_VY(I)=VYDOT(I)
+         K3_VZ(I)=VZDOT(I)
 
 
+         if (nenergy.eq.1)then
+            A3(I)=ADOT(I)
+         end if
+
+  !       if (nenergy.eq.2)then                                                                                                                               
+  !          EN3(I)=ENDOT(I)                                                                                                                                  
+  !       end if                                                                                                                                              
+      END DO
+
+      DO I=1,np
+
+         X(I)=Xold(I)+K3_X(I)*DT
+          VX(I)=VXOLD(I)+K3_VX(I)*DT
+
+          if (nenergy.eq.1)then
+             A(I)=AOLD(I)+A3(I)*DT
+             call e_from_a
+          end if
 
 
+      END DO
+
+      CALL NENE
+      CALL RHOS
+      CALL VDOTS
+      CALL EDOTS
+      
+      DO I=1,np
+
+         K4_X(I)=VX(I)
+         K4_Y(I)=VY(I)
+         K4_Z(I)=VZ(I)
 
 
+         K4_VX(I)=VXDOT(I)
+         K4_VY(I)=VYDOT(I)
+         K4_VZ(I)=VZDOT(I)
+
+         if (nenergy.eq.1)then
+            A4(I)=ADOT(I)
+         end if
+
+   !      if (nenergy.eq.2)then                                                                                                                               
+   !         EN4(I)=ENDOT(I)                                                                                                                                  
+    !     end if                                                                                                                                              
+      END DO   
+ 
+      DO I=1,np
+
+         X(I)=Xold(I)+DT*(K1_X(I)+2*K2_X(I)+2*K3_X(I)+K4_X(I))/6
+         Y(I)=Yold(I)
+         Z(I)=ZolD(I)
+
+         VX(I)=VXold(I)+DT*(K1_VX(I)+2*K2_VX(I)+2*K3_VX(I)+K4_VX(I))/6
+         VY(I)=0
+         VZ(I)=0
+
+         if (nenergy.eq.1)then
+            A(I)=AOLD(I)+DT*(A1(I)+2*A2(I)+2*A3(I)+A4(I))/6
+!                                                                                                                                                             
+            call e_From_a
+         end if
 
 
+!       FINAL POSITIONS and VELOCITIES
 
+!         if(I.gt.ntube)then!
+
+!         X(I)=Xold(I)
+!         Y(I)=Yold(I)       
+!         Z(I)=ZolD(I)   
+
+!         VX(I)=VXold(I)
+!         VY(I)=0
+!         VZ(I)=0 
+
+!         A(I)=AOLD(I)
+!         write(124,*),I,t,y(I),vy(I),z(I),vz(I)
+!      end if
+      END DO
+      do i=ntube,ntot
+         x(i)=x(i)+dt*vx(I)
+         y(i)=y(i)
+         z(i)=z(i)
+      end do
+
+
+C     If binary relaxation problem, adjust center of mass positions:                                                                                          
+      IF (NRELAX.GE.1) CALL CMADJ
+
+      do i=1,n
+         if(initgr.eq.3) then
+c     this is taken from Blanchet, Damour, and Schaefer                                                                                                    
+c     MNRAS 242, 289 (1990), Eq. (5.16),  with beta=A_i=0 in the Newtonian                                                                                 
+C     limit. Note that our code's "v" is written there as "w",                                                                                              
+C     and our code's "u" is written as "v"                                                                                                                   
+            ux(i)=vx(i)+0.8/sol**5*
+     $           (q3xx*vx(i)+q3xy*vy(i)+q3xz*vz(i))
+            uy(i)=vy(i)+0.8/sol**5*
+     $           (q3xy*vx(i)+q3yy*vy(i)+q3yz*vz(i))
+            uz(i)=vz(i)+0.8/sol**5*
+     $           (q3xz*vx(i)+q3yz*vy(i)+q3zz*vz(i))
+         else
+            ux(i)=vx(i)
+            uy(i)=vy(i)
+            uz(i)=vz(i)
+         endif
+      enddo
+      
+      T=T+DT
+      RETURN
+      END 
